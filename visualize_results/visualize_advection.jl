@@ -29,6 +29,8 @@ function visualize_advection(cooling, wind, dTf, a)
     filesave = "./results/"
 
     # load all the data!!
+    filename = "./LESStudySetup/hydrostatic_snapshots_hydrostatic_twin_simulation.jld2"
+    metadata = "./LESStudySetup/experiment_hydrostatic_twin_simulation_metadata.jld2"
     snapshots = load_snapshots(filename; metadata)
 
     simulation = LESStudySetup.idealized_setup(CPU();stop_time = 1Units.days, hydrostatic_approximation = true)

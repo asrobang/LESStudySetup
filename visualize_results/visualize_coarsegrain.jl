@@ -27,10 +27,13 @@ else
     dTf = @sprintf("%1d", dTf)
     fileparams = "free_surface_short_test_$(cooling)_wind_$(wind)_dTf_$(dTf)_a_$(a)"
 end
-filehead = "./"
+
+# Define file paths
+filehead = "./LESStudySetup/"
 filename = filehead * "hydrostatic_snapshots_" * fileparams * ".jld2"
 metadata = filehead * "experiment_" * fileparams * "_metadata.jld2"
-filesave = "./results/"
+filesave = "./figures/"
+
 initfile = filehead * "hydrostatic_snapshots_hydrostatic_background.jld2"
 
 # load all the data!!

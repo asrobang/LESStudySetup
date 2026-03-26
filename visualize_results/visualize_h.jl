@@ -25,10 +25,15 @@ function visualize(cooling, wind, dTf, a)
         dTf = @sprintf("%1d", dTf)
         fileparams = "free_surface_short_test_$(cooling)_wind_$(wind)_dTf_$(dTf)_a_$(a)"
     end
-    filehead = "./"
+
+    # Use our hydrostatic simulation data
+    fileparams = "hydrostatic_twin_simulation"
+  
+    # Define file paths
+    filehead = "./LESStudySetup/"
     filename = filehead * "hydrostatic_snapshots_" * fileparams * ".jld2"
     metadata = filehead * "experiment_" * fileparams * "_metadata.jld2"
-    filesave = "./results/"
+    filesave = "./figures/"
 
     # load all the data!!
     println("Loading data from $filename...")
@@ -55,21 +60,26 @@ function visualize(cooling, wind, dTf, a)
     return 
 end
 
-coolings = [100]
-winds = 0.1*ones(1)
-dTfs = 1*ones(1)
-as = 1.2*ones(1)
+# coolings = [100]
+# winds = 0.1*ones(1)
+# dTfs = 1*ones(1)
+# as = 1.2*ones(1)
 
-for i in 1:length(coolings)
-    visualize(coolings[i], winds[i], dTfs[i], as[i])
-end
+# for i in 1:length(coolings)
+#     visualize(coolings[i], winds[i], dTfs[i], as[i])
+# end
 
-wind,dTf,a = 0.1,1,1.2
+# Set simulation parameters (cooling rate, wind stress, surface temperature flux, etc.)
+cooling, wind, dTf,a = 50, 0.1, -1,1.0
+# Run visualization script
+visualize(cooling, wind, dTf, a)
+
+# wind,dTf,a = 0.1,1,1.2
 wind = replace("$(wind)","." => "" )
 a = replace("$(a)","." => "" )
 fig = Figure(size = (900, 300))
 ax1 = Axis(fig[1,1]; ylabel = "mean mixed layer depth (m)",xlabel="time (days)",limits = ((0, 20), (50, 100)))
-for Q in [50,75,100]
+for Q in [50] #[50,75,100]
     cooling = @sprintf("%03d", Q)
     filename = "results/h_$(cooling)_wind_$(wind)_dTf_$(dTf)_a_$(a).jld2"
     t = load(filename, "t")/60^2/24
