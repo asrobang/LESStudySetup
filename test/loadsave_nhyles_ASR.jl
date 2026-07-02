@@ -104,7 +104,7 @@ const QUADRANT_COLORS = [RGB(0.894, 0.102, 0.110),   # Q1: red - warm updrafts
 
 # --- Processing Options ---
 const SAVE_ALL_TILES = false      # Set false to skip tile extraction step
-const TARGET_TILE = 4             # Which tile to process for coarse-graining
+const TARGET_TILE = 5             # Which tile to process for coarse-graining
 
 # ===============================================================================
 # HELPER FUNCTIONS FOR QUADRANT ANALYSIS
@@ -210,7 +210,6 @@ function print_quadrant_summary(stats)
     println("      Mean w'b' (total):    $(round(stats.mean_wb, sigdigits=3)) m²/s³")
     println("      Mean w'b' (gradient): $(round(stats.wb_gradient, sigdigits=3)) m²/s³")
     println("      Mean w'b' (counter):  $(round(stats.wb_counter, sigdigits=3)) m²/s³")
-    flush(stdout)
 end
 
 """
@@ -252,7 +251,6 @@ end
 println("\n" * "="^70)
 println("STEP 1: Loading Checkpoint Metadata")
 println("="^70)
-flush(stdout)
 
 clock_info = load_checkpoint_clock(CHECKPOINT_PREFIX, ITERATION)
 
@@ -263,7 +261,6 @@ println("|  Iteration:        $(lpad(clock_info.iteration, 10))                 
 println("|  Simulation time:  $(lpad(round(clock_info.time_days, digits=3), 10)) days                        |")
 println("|                    $(lpad(round(clock_info.time, digits=1), 10)) seconds                     |")
 println("+---------------------------------------------------------------------+")
-flush(stdout)
 
 # ===============================================================================
 # SECTION 3: DIVIDE DOMAIN INTO TILES
@@ -272,7 +269,6 @@ flush(stdout)
 println("\n" * "="^70)
 println("STEP 2: Computing Domain Tiles")
 println("="^70)
-flush(stdout)
 
 tiles = compute_subdomain_tiles(;
     Lx = DOMAIN_LX,
@@ -288,7 +284,6 @@ println("  * Tile grid: $(round(Int, sqrt(n_tiles))) x $(round(Int, sqrt(n_tiles
 println("  * Core tile: $(TILE_SIZE/1e3) km x $(TILE_SIZE/1e3) km")
 println("  * With halo: $((TILE_SIZE + 2*HALO_WIDTH)/1e3) km x $((TILE_SIZE + 2*HALO_WIDTH)/1e3) km")
 println("  * Vertical: $(Z_LIMITS) m")
-flush(stdout)
 
 # ===============================================================================
 # SECTION 4: SAVE TILES (OPTIONAL)
@@ -301,7 +296,6 @@ if SAVE_ALL_TILES
     
     mkpath(OUTPUT_DIR)
     println("Output directory: $OUTPUT_DIR\n")
-    flush(stdout)
     
     for (i, tile) in enumerate(tiles)
         output_file = OUTPUT_DIR * "subdomain$(tile.tile_id)_iter$(ITERATION).jld2"
@@ -338,14 +332,12 @@ if SAVE_ALL_TILES
         )
         
         println("Done")
-        flush(stdout)
     end
     
     println("\nAll tiles saved successfully!")
 else
     println("\n[Skipping tile extraction - SAVE_ALL_TILES = false]")
 end
-flush(stdout)
 
 # ===============================================================================
 # SECTION 5: LOAD TILE AND PERFORM COARSE-GRAINING
@@ -357,7 +349,6 @@ println("="^70)
 
 input_file = OUTPUT_DIR * "subdomain$(TARGET_TILE)_iter$(ITERATION).jld2"
 println("Loading: $input_file")
-flush(stdout)
 
 snapshot = load_subdomain_snapshot(input_file; variables = ("w", "T"))
 
@@ -418,7 +409,6 @@ if required_halo > HALO_WIDTH
     # Update active halo for cropping
     active_halo_width = required_halo
 end
-flush(stdout)
 
 # Display loaded metadata
 grid = snapshot[:grid]
@@ -437,7 +427,6 @@ end
 if haskey(snapshot, :halo_width)
     println("  * Halo width: $(snapshot[:halo_width]) m")
 end
-flush(stdout)
 
 # -----------------------------------------------------------------------------
 # Compute buoyancy from temperature
@@ -453,7 +442,6 @@ println("\nInput fields:")
 println("  * w range: $(extrema(interior(w)))")
 println("  * T range: $(extrema(interior(T)))")
 println("  * b range: $(extrema(interior(b)))")
-flush(stdout)
 
 # -----------------------------------------------------------------------------
 # Apply coarse-graining filter
@@ -463,7 +451,6 @@ println("\nApplying coarse-graining filter:")
 println("  * Kernel: $KERNEL")
 println("  * Cutoff: $FILTER_CUTOFF m")
 println("  * Border: $BORDER")
-flush(stdout)
 
 # Allocate output fields for filtered quantities
 w_bar = ZFaceField(grid, Float32)
@@ -476,7 +463,6 @@ coarse_graining!(b, b_bar; kernel=KERNEL, cutoff=FILTER_CUTOFF, border=BORDER)
 t_filter = time() - t_start
 
 println("  * Filtering completed in $(round(t_filter, digits=2)) seconds")
-flush(stdout)
 
 # -----------------------------------------------------------------------------
 # Compute residuals (fine-scale fluctuations)
@@ -494,7 +480,6 @@ bp_full = interior(b) .- interior(b_bar)
 println("\n" * "="^70)
 println("STEP 5: Extracting Core Region (Discarding Halo)")
 println("="^70)
-flush(stdout)
 
 # Compute indices for the valid core region
 # Use active_halo_width (may differ from HALO_WIDTH if tile was reloaded)
@@ -531,7 +516,6 @@ println("  * w_bar range: $(extrema(w_bar_core))")
 println("  * b_bar range: $(extrema(b_bar_core))")
 println("  * w' range: $(extrema(wp_core))")
 println("  * b' range: $(extrema(bp_core))")
-flush(stdout)
 
 # ===============================================================================
 # SECTION 7: QUADRANT ANALYSIS
@@ -540,7 +524,6 @@ flush(stdout)
 println("\n" * "="^70)
 println("STEP 6: Quadrant Analysis (w' vs b')")
 println("="^70)
-flush(stdout)
 
 # Interpolate w' to cell centers (average adjacent z-faces)
 # w' is on z-faces (Nz+1), b' is at cell centers (Nz)
@@ -627,7 +610,6 @@ println("\n2D Histogram (significant points only):")
 println("  * w' bins: $(length(w_edges)-1), range $(extrema(w_edges))")
 println("  * b' bins: $(length(b_edges)-1), range $(extrema(b_edges))")
 println("  * Max counts per bin: $(maximum(counts))")
-flush(stdout)
 
 # =============================================================================
 # SECTION 7A: FIGURE 1 - 2×2 Histogram Layout
@@ -731,7 +713,6 @@ if SAVE_FIGURES && !isfile(fig1_path)
 elseif SAVE_FIGURES
     println("  Skipping Figure 1: $fig1_path already exists")
 end
-flush(stdout)
 
 # =============================================================================
 # SECTION 7B: FIGURE 2 - 3×1 x-z Slices with Quadrant Spatial Distribution
@@ -809,7 +790,6 @@ if SAVE_FIGURES && !isfile(fig2_path)
 elseif SAVE_FIGURES
     println("  Skipping Figure 2: $fig2_path already exists")
 end
-flush(stdout)
 
 # =============================================================================
 # SECTION 7C: FIGURE 3 - 2×2 x-y Slices at Different Z-levels
@@ -884,7 +864,6 @@ if SAVE_FIGURES && !isfile(fig3_path)
 elseif SAVE_FIGURES
     println("  Skipping Figure 3: $fig3_path already exists")
 end
-flush(stdout)
 
 # ===============================================================================
 # SECTION 8: SUMMARY AND OUTPUT
@@ -909,5 +888,3 @@ if SAVE_FIGURES
     println("  * $(OUTPUT_DIR)quadrant_xz_slices_tile$(TARGET_TILE)_iter$(ITERATION).pdf")
     println("  * $(OUTPUT_DIR)quadrant_xy_slices_tile$(TARGET_TILE)_iter$(ITERATION).pdf")
 end
-
-flush(stdout)

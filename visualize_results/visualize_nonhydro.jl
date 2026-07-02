@@ -12,10 +12,11 @@ set_theme!(theme_latexfonts(), fontsize=12, figure_padding = 10)
 using JLD2 #, CUDA
 set_value!(; Δh = 4.8828125)
 filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/" 
-filesave = "results/"
+filesave = "figures/nonhydro/"
 f = parameters.f;
 Q, h₀, ρ₀, cₚ, α, g = 40, 60, parameters.ρ₀, parameters.cp, parameters.α, parameters.g
 wₛ = (α * g * Q * h₀ / (ρ₀ * cₚ))^(1/3)
+
 # --- Helper Functions ---
 function get_iterations_regex(filehead, fileparam, directory="."; subdirparam="subdomains", rank = 1008)
     subdir = joinpath(directory, filehead * subdirparam)
@@ -715,27 +716,32 @@ iteration = 37003
 #    file["fields/wa"] = wᵃ
 # end
 
-file = jldopen(filehead * "subdomains/Vavgs_iter$(iteration)_afront.jld2", "r");
-Bᵃ = file["fields/ba"]
-uᵃ = file["fields/ua"]
-vᵃ = file["fields/va"]
-wᵃ = file["fields/wa"]
-close(file)
+# ### -------------------------------------------------------------------------
+# ## Plot w^a vs. b^a
 
-h = fit(Histogram, (vec((wᵃ[:,1,1:end-1].+wᵃ[:,1,2:end])/2), vec(Bᵃ)), nbins=50);
-counts = h.weights
-w_edges = h.edges[1]
-b_edges = h.edges[2]
-@info "plot along-y mean wᵃ bᵃ..."
-fig = Figure(size = (540, 400))
-ax = Axis(fig[1,1]; xlabel=L"w^a~\text{(m s^{-1})}", ylabel=L"b^a~\text{(m s^{-2})}")
-# scatter!(ax, vec((wᵃ[:,1,1:end-1].+wᵃ[:,1,2:end])/2), vec(Bᵃ), alpha=0.5, markersize = 3)
-hm = heatmap!(ax, w_edges, b_edges, log10.(1 .+ counts); rasterize = true, colormap = Reverse(:grays))
-Colorbar(fig[1,2], hm)
-hlines!(ax, 0, color=:black, linestyle=:dash)
-vlines!(ax, 0, color=:black, linestyle=:dash)
-resize_to_layout!(fig)
-save(filesave * "waba_30h_iter$(iteration)_log10.pdf", fig; pt_per_unit = 1)
+# file = jldopen(filehead * "subdomains/Vavgs_iter$(iteration)_afront.jld2", "r");
+# Bᵃ = file["fields/ba"]
+# uᵃ = file["fields/ua"]
+# vᵃ = file["fields/va"]
+# wᵃ = file["fields/wa"]
+# close(file)
+
+# h = fit(Histogram, (vec((wᵃ[:,1,1:end-1].+wᵃ[:,1,2:end])/2), vec(Bᵃ)), nbins=50);
+# counts = h.weights
+# w_edges = h.edges[1]
+# b_edges = h.edges[2]
+# @info "plot along-y mean wᵃ bᵃ..."
+# fig = Figure(size = (540, 400))
+# ax = Axis(fig[1,1]; xlabel=L"w^a~\text{(m s^{-1})}", ylabel=L"b^a~\text{(m s^{-2})}")
+# # scatter!(ax, vec((wᵃ[:,1,1:end-1].+wᵃ[:,1,2:end])/2), vec(Bᵃ), alpha=0.5, markersize = 3)
+# hm = heatmap!(ax, w_edges, b_edges, log10.(1 .+ counts); rasterize = true, colormap = Reverse(:grays))
+# Colorbar(fig[1,2], hm)
+# hlines!(ax, 0, color=:black, linestyle=:dash)
+# vlines!(ax, 0, color=:black, linestyle=:dash)
+# resize_to_layout!(fig)
+# save(filesave * "waba_30h_iter$(iteration)_log10.pdf", fig; pt_per_unit = 1)
+
+### -------------------------------------------------------------------------
 
 # fig = Figure(size = (640, 400))
 # gab = fig[1, 1] = GridLayout()
@@ -779,127 +785,132 @@ save(filesave * "waba_30h_iter$(iteration)_log10.pdf", fig; pt_per_unit = 1)
 # resize_to_layout!(fig)
 # save(filesave * "afrontfields2_vslices_30h_iter$(iteration).pdf", fig; pt_per_unit = 1)
 
-varᵃ = (uᵃ, vᵃ, wᵃ, Bᵃ)
-fig = Figure(size = (640, 900))
-for i = 1:4
-    fileparam = "subdomain" * string(5-i)
-    @info "Computing and saving data for $fileparam"
-    # 1. Define the filename of the saved snapshot
-    output_filename = filehead * "subdomains/" * fileparam * "_snapshot_iter$(iteration).jld2"
+# ### -------------------------------------------------------------------------
+# ## Plot w^s vs. b^s and w' vs. b'
 
-    # 2. Load the snapshot using the new function
-    snapshot = load_subdomain_snapshot(output_filename; variables = ("u", "v", "w", "T", "MLD3"));
+# varᵃ = (uᵃ, vᵃ, wᵃ, Bᵃ)
+# fig = Figure(size = (640, 900))
+# for i = 1:4
+#     fileparam = "subdomain" * string(5-i)
+#     @info "Computing and saving data for $fileparam"
+#     # 1. Define the filename of the saved snapshot
+#     output_filename = filehead * "subdomains/" * fileparam * "_snapshot_iter$(iteration).jld2"
 
-    x0, y0, z0 = nodes(snapshot[:T])
-    yc = 0.5 * (y0[640] + y0[641])
-    to_grid = RectilinearGrid(snapshot[:grid].architecture,Float32;
-                              size = (2048*2, 512*2, length(z0)),
-                              x = (-10000,10000),
-                              y = (yc-parameters.Δh*512,yc+parameters.Δh*512),
-                              z = (-81,0),
-                              topology = (Bounded, Bounded, Bounded))
+#     # 2. Load the snapshot using the new function
+#     snapshot = load_subdomain_snapshot(output_filename; variables = ("u", "v", "w", "T", "MLD3"));
 
-    b = compute!(Field(α * g * snapshot[:T]))
-    itp_w = ZFaceField(to_grid,Float32)
-    itp_b = CenterField(to_grid,Float32)
-    interpolate!(itp_w, snapshot[:w])
-    interpolate!(itp_b, b)
-    w̅ = ZFaceField(snapshot[:w].grid,Float32)
-    b̅ = CenterField(b.grid,Float32)
-    coarse_graining!(snapshot[:w], w̅; kernel=:gaussian, cutoff=300, border=:reflect)
-    coarse_graining!(b, b̅; kernel=:gaussian, cutoff=300, border=:reflect)
-    itp_w̅ = ZFaceField(to_grid,Float32)
-    itp_b̅ = CenterField(to_grid,Float32)
-    interpolate!(itp_w̅, w̅)
-    interpolate!(itp_b̅, b̅)
-    wᵖ = interior(itp_w) .- interior(itp_w̅)
-    bᵖ = interior(itp_b) .- interior(itp_b̅)
-    wˢ = interior(itp_w̅) .- wᵃ
-    bˢ = interior(itp_b̅) .- Bᵃ
+#     x0, y0, z0 = nodes(snapshot[:T])
+#     yc = 0.5 * (y0[640] + y0[641])
+#     to_grid = RectilinearGrid(snapshot[:grid].architecture,Float32;
+#                               size = (2048*2, 512*2, length(z0)),
+#                               x = (-10000,10000),
+#                               y = (yc-parameters.Δh*512,yc+parameters.Δh*512),
+#                               z = (-81,0),
+#                               topology = (Bounded, Bounded, Bounded))
 
-    h = fit(Histogram, (vec((wˢ[:,:,1:end-1].+wˢ[:,:,2:end])/2), vec(bˢ)), nbins=50);
-    scounts = h.weights
-    sw_edges = h.edges[1]
-    sb_edges = h.edges[2]
-    h = fit(Histogram, (vec((wᵖ[:,:,1:end-1].+wᵖ[:,:,2:end])/2), vec(bˢ)), nbins=50);
-    pcounts = h.weights
-    pw_edges = h.edges[1]
-    pb_edges = h.edges[2]
+#     b = compute!(Field(α * g * snapshot[:T]))
+#     itp_w = ZFaceField(to_grid,Float32)
+#     itp_b = CenterField(to_grid,Float32)
+#     interpolate!(itp_w, snapshot[:w])
+#     interpolate!(itp_b, b)
+#     w̅ = ZFaceField(snapshot[:w].grid,Float32)
+#     b̅ = CenterField(b.grid,Float32)
+#     coarse_graining!(snapshot[:w], w̅; kernel=:gaussian, cutoff=300, border=:reflect)
+#     coarse_graining!(b, b̅; kernel=:gaussian, cutoff=300, border=:reflect)
+#     itp_w̅ = ZFaceField(to_grid,Float32)
+#     itp_b̅ = CenterField(to_grid,Float32)
+#     interpolate!(itp_w̅, w̅)
+#     interpolate!(itp_b̅, b̅)
+#     wᵖ = interior(itp_w) .- interior(itp_w̅)
+#     bᵖ = interior(itp_b) .- interior(itp_b̅)
+#     wˢ = interior(itp_w̅) .- wᵃ
+#     bˢ = interior(itp_b̅) .- Bᵃ
 
-    if i<4
-        axs = Axis(fig[i,1]; ylabel=L"b^s~\text{(m s^{-1})}")
-        axp = Axis(fig[i,3]; ylabel=L"b^\prime~\text{(m s^{-1})}")
-    else
-        axs = Axis(fig[i,1]; xlabel=L"w^s~\text{(m s^{-1})}", ylabel=L"b^s~\text{(m s^{-2})}")
-        axp = Axis(fig[i,3]; xlabel=L"w^\prime~\text{(m s^{-1})}", ylabel=L"b^\prime~\text{(m s^{-2})}")
-    end
-    # scatter!(axs, vec(interior(wˢ)), vec(interior(bˢ)), alpha=0.5, markersize = 3)
-    # scatter!(axp, vec(interior(wᵖ)), vec(interior(bᵖ)), alpha=0.5, markersize = 3)
-    hm1 = heatmap!(axs, sw_edges, sb_edges, log10.(1 .+ scounts); rasterize = true, colormap = Reverse(:grays))
-    Colorbar(fig[i,2], hm1)
-    hm2 = heatmap!(axp, pw_edges, pb_edges, log10.(1 .+ pcounts); rasterize = true, colormap = Reverse(:grays))
-    Colorbar(fig[i,4], hm)
-    hlines!(axs, 0, color=:black, linestyle=:dash)
-    hlines!(axp, 0, color=:black, linestyle=:dash)
-    vlines!(axs, 0, color=:black, linestyle=:dash)
-    vlines!(axp, 0, color=:black, linestyle=:dash)
+#     h = fit(Histogram, (vec((wˢ[:,:,1:end-1].+wˢ[:,:,2:end])/2), vec(bˢ)), nbins=50);
+#     scounts = h.weights
+#     sw_edges = h.edges[1]
+#     sb_edges = h.edges[2]
+#     h = fit(Histogram, (vec((wᵖ[:,:,1:end-1].+wᵖ[:,:,2:end])/2), vec(bˢ)), nbins=50);
+#     pcounts = h.weights
+#     pw_edges = h.edges[1]
+#     pb_edges = h.edges[2]
 
-    # u̅, v̅, w̅, B̅, uˢ, vˢ, wˢ, Bˢ, τuu, τvv, τww, τwb, Πₕ, Πᵥ, Πᵥg, Pᵃ, Pᵃᵥg, Pˢ, Pˢᵥg, Pᵀ, wˢbˢ = coarse_grained_fluxes(snapshot, Ub, Vb, varᵃ; to_grid, cutoff=300, border=:reflect, Lx = snapshot[:grid].Lx, Ly = snapshot[:grid].Ly);
+#     if i<4
+#         axs = Axis(fig[i,1]; ylabel=L"b^s~\text{(m s^{-1})}")
+#         axp = Axis(fig[i,3]; ylabel=L"b^\prime~\text{(m s^{-1})}")
+#     else
+#         axs = Axis(fig[i,1]; xlabel=L"w^s~\text{(m s^{-1})}", ylabel=L"b^s~\text{(m s^{-2})}")
+#         axp = Axis(fig[i,3]; xlabel=L"w^\prime~\text{(m s^{-1})}", ylabel=L"b^\prime~\text{(m s^{-2})}")
+#     end
+#     # scatter!(axs, vec(interior(wˢ)), vec(interior(bˢ)), alpha=0.5, markersize = 3)
+#     # scatter!(axp, vec(interior(wᵖ)), vec(interior(bᵖ)), alpha=0.5, markersize = 3)
+#     hm1 = heatmap!(axs, sw_edges, sb_edges, log10.(1 .+ scounts); rasterize = true, colormap = Reverse(:grays))
+#     Colorbar(fig[i,2], hm1)
+#     hm2 = heatmap!(axp, pw_edges, pb_edges, log10.(1 .+ pcounts); rasterize = true, colormap = Reverse(:grays))
+#     Colorbar(fig[i,4], hm)
+#     hlines!(axs, 0, color=:black, linestyle=:dash)
+#     hlines!(axp, 0, color=:black, linestyle=:dash)
+#     vlines!(axs, 0, color=:black, linestyle=:dash)
+#     vlines!(axp, 0, color=:black, linestyle=:dash)
 
-#     xi, _, _ = nodes(CenterField(to_grid,Float32))
-#     itp2nodes(field) = Array([interpolate((x, yc, z), field) for x in xi, z in z0'])
-#     jldopen(filehead * "subdomains/Vslices_"*fileparam*"_iter$(iteration)_afront.jld2", "w") do file
-#         file["fields/bcg"] = B̅[1]
-#         file["fields/ucg"] = u̅[1]
-#         file["fields/vcg"] = v̅[1]
-#         file["fields/wcg"] = w̅[1]
-#         file["fields/bcga"] = interior(B̅[2])
-#         file["fields/ucga"] = interior(u̅[2])
-#         file["fields/vcga"] = interior(v̅[2])
-#         file["fields/wcga"] = interior(w̅[2])
-#         file["fields/us"]  = itp2nodes(uˢ)
-#         file["fields/vs"]  = itp2nodes(vˢ)
-#         file["fields/ws"]  = itp2nodes(wˢ)
-#         file["fields/bs"]  = itp2nodes(Bˢ)
-#         println(mean(uˢ, dims=2))
-#         file["fields/usa"]  = interior(mean(uˢ, dims=2))
-#         file["fields/vsa"]  = interior(mean(vˢ, dims=2))
-#         file["fields/wsa"]  = interior(mean(wˢ, dims=2))
-#         file["fields/bsa"]  = interior(mean(Bˢ, dims=2))
-#         file["fields/τwb"] = τwb[1]
-#         file["fields/τwba"] = interior(τwb[2])
-#         file["fields/wbs"] = itp2nodes(wˢbˢ)
-#         file["fields/wbsa"] = interior(mean(wˢbˢ, dims=2))
-#         file["fields/τuu"] = τuu[1]
-#         file["fields/τww"] = τww[1]
-#         file["fields/τvv"] = τvv[1]
-#         file["fields/τuua"] = interior(τuu[2])
-#         file["fields/τwwa"] = interior(τww[2])
-#         file["fields/τvva"] = interior(τvv[2])
-#         file["fields/Ph"] = itp2nodes(Πₕ)#, itp2nodes(mean(Πₕ, dims=2))] #./ (parameters.f * wₛ^2)
-#         file["fields/Pv"] = itp2nodes(Πᵥ)#, itp2nodes(mean(Πᵥ, dims=2))] #./ (parameters.f * wₛ^2)
-#         file["fields/Pvg"] = itp2nodes(Πᵥg)
-#         file["fields/Pas"] = itp2nodes(Pᵃ)#, itp2nodes(mean(Pᵃ, dims=2))] #./ (parameters.f * wₛ^2)
-#         file["fields/Pasg"] = itp2nodes(Pᵃᵥg)
-#         file["fields/Pss"] = itp2nodes(Pˢ)#, itp2nodes(mean(Pˢ, dims=2))] #./ (parameters.f * wₛ^2)
-#         file["fields/Pssg"] = itp2nodes(Pˢᵥg)
-#         file["fields/PTs"] = itp2nodes(Pᵀ)#, itp2nodes(mean(Pᵀ, dims=2))] #./ (parameters.f * wₛ^2)
-#         file["fields/Pha"] = interior(mean(Πₕ, dims=2))
-#         file["fields/Pva"] = interior(mean(Πᵥ, dims=2))
-#         file["fields/Pasa"] = interior(mean(Pᵃ, dims=2))
-#         file["fields/Pssa"] = interior(mean(Pˢ, dims=2))
-#         file["fields/PTsa"] = interior(mean(Pᵀ, dims=2))
+#     # u̅, v̅, w̅, B̅, uˢ, vˢ, wˢ, Bˢ, τuu, τvv, τww, τwb, Πₕ, Πᵥ, Πᵥg, Pᵃ, Pᵃᵥg, Pˢ, Pˢᵥg, Pᵀ, wˢbˢ = coarse_grained_fluxes(snapshot, Ub, Vb, varᵃ; to_grid, cutoff=300, border=:reflect, Lx = snapshot[:grid].Lx, Ly = snapshot[:grid].Ly);
+
+# #     xi, _, _ = nodes(CenterField(to_grid,Float32))
+# #     itp2nodes(field) = Array([interpolate((x, yc, z), field) for x in xi, z in z0'])
+# #     jldopen(filehead * "subdomains/Vslices_"*fileparam*"_iter$(iteration)_afront.jld2", "w") do file
+# #         file["fields/bcg"] = B̅[1]
+# #         file["fields/ucg"] = u̅[1]
+# #         file["fields/vcg"] = v̅[1]
+# #         file["fields/wcg"] = w̅[1]
+# #         file["fields/bcga"] = interior(B̅[2])
+# #         file["fields/ucga"] = interior(u̅[2])
+# #         file["fields/vcga"] = interior(v̅[2])
+# #         file["fields/wcga"] = interior(w̅[2])
+# #         file["fields/us"]  = itp2nodes(uˢ)
+# #         file["fields/vs"]  = itp2nodes(vˢ)
+# #         file["fields/ws"]  = itp2nodes(wˢ)
+# #         file["fields/bs"]  = itp2nodes(Bˢ)
+# #         println(mean(uˢ, dims=2))
+# #         file["fields/usa"]  = interior(mean(uˢ, dims=2))
+# #         file["fields/vsa"]  = interior(mean(vˢ, dims=2))
+# #         file["fields/wsa"]  = interior(mean(wˢ, dims=2))
+# #         file["fields/bsa"]  = interior(mean(Bˢ, dims=2))
+# #         file["fields/τwb"] = τwb[1]
+# #         file["fields/τwba"] = interior(τwb[2])
+# #         file["fields/wbs"] = itp2nodes(wˢbˢ)
+# #         file["fields/wbsa"] = interior(mean(wˢbˢ, dims=2))
+# #         file["fields/τuu"] = τuu[1]
+# #         file["fields/τww"] = τww[1]
+# #         file["fields/τvv"] = τvv[1]
+# #         file["fields/τuua"] = interior(τuu[2])
+# #         file["fields/τwwa"] = interior(τww[2])
+# #         file["fields/τvva"] = interior(τvv[2])
+# #         file["fields/Ph"] = itp2nodes(Πₕ)#, itp2nodes(mean(Πₕ, dims=2))] #./ (parameters.f * wₛ^2)
+# #         file["fields/Pv"] = itp2nodes(Πᵥ)#, itp2nodes(mean(Πᵥ, dims=2))] #./ (parameters.f * wₛ^2)
+# #         file["fields/Pvg"] = itp2nodes(Πᵥg)
+# #         file["fields/Pas"] = itp2nodes(Pᵃ)#, itp2nodes(mean(Pᵃ, dims=2))] #./ (parameters.f * wₛ^2)
+# #         file["fields/Pasg"] = itp2nodes(Pᵃᵥg)
+# #         file["fields/Pss"] = itp2nodes(Pˢ)#, itp2nodes(mean(Pˢ, dims=2))] #./ (parameters.f * wₛ^2)
+# #         file["fields/Pssg"] = itp2nodes(Pˢᵥg)
+# #         file["fields/PTs"] = itp2nodes(Pᵀ)#, itp2nodes(mean(Pᵀ, dims=2))] #./ (parameters.f * wₛ^2)
+# #         file["fields/Pha"] = interior(mean(Πₕ, dims=2))
+# #         file["fields/Pva"] = interior(mean(Πᵥ, dims=2))
+# #         file["fields/Pasa"] = interior(mean(Pᵃ, dims=2))
+# #         file["fields/Pssa"] = interior(mean(Pˢ, dims=2))
+# #         file["fields/PTsa"] = interior(mean(Pᵀ, dims=2))
         
-#         file["metadata/iteration"] = iteration
-#         file["metadata/x"] = xi
-#         file["metadata/y"] = yc
-#         file["metadata/z"] = z0
-    # end
-end
-resize_to_layout!(fig)
-save(filesave * "wsbswpbp_30h_iter$(iteration)_log10.pdf", fig; pt_per_unit = 1)
-println("Finished plotting wsbswpbp fields")
-# println("Finished plotting TKE, SKE, and P fields")
+# #         file["metadata/iteration"] = iteration
+# #         file["metadata/x"] = xi
+# #         file["metadata/y"] = yc
+# #         file["metadata/z"] = z0
+#     # end
+# end
+# resize_to_layout!(fig)
+# save(filesave * "wsbswpbp_30h_iter$(iteration)_log10.pdf", fig; pt_per_unit = 1)
+# println("Finished plotting wsbswpbp fields")
+# # println("Finished plotting TKE, SKE, and P fields")
+
+### -------------------------------------------------------------------------
 
 # σ4 = vec(interior(σn, 1, 600:-160:1, 224))
 # V4 = vec(interior(Vb, 1, 600:-160:1, 224))
@@ -1273,107 +1284,119 @@ println("Finished plotting wsbswpbp fields")
 # end
 # println("Finished plotting uvEw fields")
 
-#################################
-# iteration = 72635
-# # 1. Define the filename of the saved snapshot
-# output_filename = filehead * "subdomains/" * fileparam * "_snapshot_iter$(iteration).jld2"
+### -------------------------------------------------------------------------
+## Plots a vertical slice of the vertical velocity w
 
-# # 2. Load the snapshot using the new function
-# snapshot = load_subdomain_snapshot(output_filename)
-# fig = Figure(size = (640, 320))
-# gab = fig[1, 1] = GridLayout()
-# x, y, z = nodes(snapshot[:w]);
-# ax_a = Axis(gab[1,1]; titlealign = :left, title=L"\text{(a)}~w~\text{(mm s^{-1})}", xlabel=L"x~\text{(km)}", ylabel=L"z~\text{(m)}",limits=(nothing,(-90,0)))
-# ax_b = Axis(gab[1,3]; titlealign = :left, title=L"\text{(b)}", xlabel=L"10^6\langle\text{KE}_w\rangle~\text{(m^2~s^{-2})}",limits=(nothing,(-90,0)))
-# hm_a = heatmap!(ax_a, 1e-3x, z, 1e3interior(snapshot[:w], :, 1497, :); rasterize = true, colormap = :delta, colorrange = (-20, 20))
-# Colorbar(gab[1,2], hm_a)
+# Query data
+fileparam = "subdomain3" 
+iteration = 164410 # [32207, 37003, 49086, 52543, 72635]
+# 1. Define the filename of the saved snapshot
+# output_filename = filehead * "subdomains/" * fileparam * "_snapshot_iter$(iteration).jld2"
+output_filename = filehead * "subdomains/" * fileparam * "_iter$(iteration).jld2"
+# 2. Load the snapshot using the new function
+snapshot = load_subdomain_snapshot(output_filename)
+
+# 3. Plot figure 
+fig = Figure(size = (640, 320))
+gab = fig[1, 1] = GridLayout()
+x, y, z = nodes(snapshot[:w]);
+ax_a = Axis(gab[1,1]; titlealign = :left, title=L"\text{(a)}~w~\text{(mm s^{-1})}", xlabel=L"x~\text{(km)}", ylabel=L"z~\text{(m)}",limits=(nothing,(-90,0)))
+ax_b = Axis(gab[1,3]; titlealign = :left, title=L"\text{(b)}", xlabel=L"10^6\langle\text{KE}_w\rangle~\text{(m^2~s^{-2})}",limits=(nothing,(-90,0)))
+hm_a = heatmap!(ax_a, 1e-3x, z, 1e3interior(snapshot[:w], :, 1497, :); rasterize = true, colormap = :delta, colorrange = (-20, 20))
+Colorbar(gab[1,2], hm_a)
 # lines!(ax_a, 1e-3x, -interior(snapshot[:BLD], :, 1497, 1), color = :black, linewidth = 0.5, alpha=0.8)
-# #lines!(ax_a, 1e-3x, -interior(snapshot[:MLD], :, 1497, 1), color = :red, linewidth = 1)
-# #lines!(ax_a, 1e-3x, -interior(snapshot[:MLD2], :, 1497, 1), color = :blue, linewidth = 1)
+#lines!(ax_a, 1e-3x, -interior(snapshot[:MLD], :, 1497, 1), color = :red, linewidth = 1)
+#lines!(ax_a, 1e-3x, -interior(snapshot[:MLD2], :, 1497, 1), color = :blue, linewidth = 1)
 # lines!(ax_a, 1e-3x, -interior(snapshot[:MLD3], :, 1497, 1), color = :green, linewidth = 1)
-# vlines!(ax_a, 1e-3x[[2004,1004,3004]], color = [:orange, :green, :purple], linewidth = 0.8)
-# hideydecorations!(ax_b, ticks = false)
-# lines!(ax_b, 1e6*vec(mean(interior(snapshot[:w], :, 1497, :).^2/2, dims =(1))), z; linewidth = 1)
-# lines!(ax_b, 1e6*interior(snapshot[:w], 2004, 1497, :).^2/2, z; linewidth = 1)
-# lines!(ax_b, 1e6*interior(snapshot[:w], 1004, 1497, :).^2/2, z; linewidth = 1)
-# lines!(ax_b, 1e6*interior(snapshot[:w], 3004, 1497, :).^2/2, z; linewidth = 1)
+vlines!(ax_a, 1e-3x[[2004,1004,3004]], color = [:orange, :green, :purple], linewidth = 0.8)
+hideydecorations!(ax_b, ticks = false)
+lines!(ax_b, 1e6*vec(mean(interior(snapshot[:w], :, 1497, :).^2/2, dims =(1))), z; linewidth = 1)
+lines!(ax_b, 1e6*interior(snapshot[:w], 2004, 1497, :).^2/2, z; linewidth = 1)
+lines!(ax_b, 1e6*interior(snapshot[:w], 1004, 1497, :).^2/2, z; linewidth = 1)
+lines!(ax_b, 1e6*interior(snapshot[:w], 3004, 1497, :).^2/2, z; linewidth = 1)
 # hlines!(ax_b, -interior(snapshot[:BLD], :, 1497, 1)[[2004,1004,3004]], linestyle = :dash, color = [:orange, :green, :purple], linewidth = 0.8)
-# colsize!(gab, 3, Relative(0.3))
-# colgap!(gab, 1, 1)
-# resize_to_layout!(fig)
-# save(filesave * "w_" * fileparam * "_2d_iter$(iteration).pdf", fig; pt_per_unit = 1)
-# println("Finished plotting w fields")
+colsize!(gab, 3, Relative(0.3))
+colgap!(gab, 1, 1)
+resize_to_layout!(fig)
+save(filesave * "w_" * fileparam * "_2d_iter$(iteration).pdf", fig; pt_per_unit = 1)
+println("Finished plotting w fields")
 
-##############################
-# iteration = 72635
+### -------------------------------------------------------------------------
+## Plots horizontal and vertical slices of T, w, u, v fields at a specified iteration
+## depth? 
+## part at which vertical slice is made? 
+
 # # 1. Define the filename of the saved snapshot
 # output_filename = filehead * "subdomains/" * fileparam * "_snapshot_iter$(iteration).jld2"
-
 # # 2. Load the snapshot using the new function
 # snapshot = load_subdomain_snapshot(output_filename)
-# x, y, z = nodes(snapshot[:T]);
-# _, _, zw = nodes(snapshot[:w]);
-# k = 77
-# Tmap, wmap, vmap = :thermal,:delta,:balance
-# wmax,umax,vmax=0.01,0.15,0.2
-# #fig = Figure(size = (640, 450))
-# fig = Figure(size = (640, 750))
-# gabc = fig[1, 1] = GridLayout()
-# aspect = 1
-# axis_kwargs = (ylabel = L"y~\text{(km)}", aspect=aspect)
-# ax_a = Axis(gabc[1,1]; titlealign = :left, title=L"\text{(a)}~T~\text{({^\circ}C)}", axis_kwargs...)
-# ax_b = Axis(gabc[1,3]; titlealign = :left, title=L"\text{(b)}~w~\text{(m s^{-1})}", aspect=aspect)
-# ax_c = Axis(gabc[3,1]; titlealign = :left, title=L"\text{(c)}~u~\text{(m s^{-1})}", axis_kwargs...) 
-# ax_d = Axis(gabc[3,3]; titlealign = :left, title=L"\text{(d)}~v~\text{(m s^{-1})}", aspect=aspect) 
-# hm_a = heatmap!(ax_a, 1e-3x, 1e-3y, (interior(snapshot[:T],:,:,k)); rasterize = true, colormap = Tmap)
-# hm_b = heatmap!(ax_b, 1e-3x, 1e-3y, (interior(snapshot[:w],:,:,k)); rasterize = true, colormap = wmap, colorrange = (-wmax, wmax))
-# hm_c = heatmap!(ax_c, 1e-3x, 1e-3y, (interior(snapshot[:u],:,:,k)); rasterize = true, colormap = vmap, colorrange = (-umax, umax))
-# hm_d = heatmap!(ax_d, 1e-3x, 1e-3y, (interior(snapshot[:v],:,:,k)); rasterize = true, colormap = vmap, colorrange = (-vmax, vmax))
-# Colorbar(gabc[1,2], hm_a)
-# Colorbar(gabc[1,4], hm_b)
-# Colorbar(gabc[3,2], hm_c)
-# Colorbar(gabc[3,4], hm_d)
-# hidexdecorations!(ax_a, ticks = false)
-# hidexdecorations!(ax_b, ticks = false)
-# hidexdecorations!(ax_c, ticks = false)
-# hidexdecorations!(ax_d, ticks = false)
-# hideydecorations!(ax_b, ticks = false)
-# hideydecorations!(ax_d, ticks = false)
 
-# # T̄ = (mean(snapshot[:T], dims = 2));
-# # w̄ = (mean(snapshot[:w], dims = 2));
-# # ū = (mean(snapshot[:u], dims = 2));
-# # v̄ = (mean(snapshot[:v], dims = 2));
-# zmin = -75
-# kz = findfirst(z .≥ zmin)
-# Nz = length(z)
-# axis_kwargs0 = (xlabel = L"x~\text{(km)}", ylabel = L"z~\text{(m)}", limits = (nothing, (zmin, 0)))
-# axis_kwargs1 = NamedTuple{(:xlabel,:ylabel)}(axis_kwargs0)
-# ax_a = Axis(gabc[2,1]; titlealign = :left, axis_kwargs0...)
-# ax_b = Axis(gabc[2,3]; titlealign = :left, xlabel = L"x~\text{(km)}", limits = (nothing, (zmin, 0)))
-# ax_c = Axis(gabc[4,1]; titlealign = :left,  limits = (nothing, (zmin, 0)), axis_kwargs1...)
-# ax_d = Axis(gabc[4,3]; titlealign = :left, xlabel = L"x~\text{(km)}", limits = (nothing, (zmin, 0)))
-# wmax,umax,vmax=0.01,0.1,0.2
-# hm_a = heatmap!(ax_a, 1e-3x, z[kz:Nz], (interior(snapshot[:T],:,3*640,kz:Nz)); rasterize = true, colormap = Tmap)#, colorrange = (vmin, vmax))
-# hm_b = heatmap!(ax_b, 1e-3x, zw[kz:Nz], (interior(snapshot[:w],:,3*640,kz:Nz)); rasterize = true, colormap = wmap, colorrange = (-wmax, wmax))
-# hm_c = heatmap!(ax_c, 1e-3x, z[kz:Nz], (interior(snapshot[:u],:,3*640,kz:Nz)); rasterize = true, colormap = vmap, colorrange = (-umax, umax))
-# hm_d = heatmap!(ax_d, 1e-3x, z[kz:Nz], (interior(snapshot[:v],:,3*640,kz:Nz)); rasterize = true, colormap = vmap, colorrange = (-vmax, vmax))
-# hideydecorations!(ax_b, ticks = false)
-# hideydecorations!(ax_d, ticks = false)
-# Colorbar(gabc[2,2], hm_a)
-# Colorbar(gabc[2,4], hm_b)
-# Colorbar(gabc[4,2], hm_c)
-# Colorbar(gabc[4,4], hm_d)
-# rowgap!(gabc, 4)
-# colgap!(gabc, 1, 1)
-# colgap!(gabc, 3, 1)
-# colgap!(gabc, 2, 5)
-# for row = [2,4]
-#     rowsize!(gabc, row, Relative(0.14))
-# end
-# resize_to_layout!(fig)
-# save(filesave * "Twuv_" * fileparam * "_3d_iter$(iteration).pdf", fig; pt_per_unit = 1)
-# println("Finished plotting Twuv fields")
+# 3. Plot figure
+x, y, z = nodes(snapshot[:T]);
+_, _, zw = nodes(snapshot[:w]);
+k = 77
+Tmap, wmap, vmap = :thermal,:delta,:balance
+wmax,umax,vmax=0.01,0.15,0.2
+#fig = Figure(size = (640, 450))
+fig = Figure(size = (640, 750))
+gabc = fig[1, 1] = GridLayout()
+aspect = 1
+axis_kwargs = (ylabel = L"y~\text{(km)}", aspect=aspect)
+ax_a = Axis(gabc[1,1]; titlealign = :left, title=L"\text{(a)}~T~\text{({^\circ}C)}", axis_kwargs...)
+ax_b = Axis(gabc[1,3]; titlealign = :left, title=L"\text{(b)}~w~\text{(m s^{-1})}", aspect=aspect)
+ax_c = Axis(gabc[3,1]; titlealign = :left, title=L"\text{(c)}~u~\text{(m s^{-1})}", axis_kwargs...) 
+ax_d = Axis(gabc[3,3]; titlealign = :left, title=L"\text{(d)}~v~\text{(m s^{-1})}", aspect=aspect) 
+hm_a = heatmap!(ax_a, 1e-3x, 1e-3y, (interior(snapshot[:T],:,:,k)); rasterize = true, colormap = Tmap)
+hm_b = heatmap!(ax_b, 1e-3x, 1e-3y, (interior(snapshot[:w],:,:,k)); rasterize = true, colormap = wmap, colorrange = (-wmax, wmax))
+hm_c = heatmap!(ax_c, 1e-3x, 1e-3y, (interior(snapshot[:u],:,:,k)); rasterize = true, colormap = vmap, colorrange = (-umax, umax))
+hm_d = heatmap!(ax_d, 1e-3x, 1e-3y, (interior(snapshot[:v],:,:,k)); rasterize = true, colormap = vmap, colorrange = (-vmax, vmax))
+Colorbar(gabc[1,2], hm_a)
+Colorbar(gabc[1,4], hm_b)
+Colorbar(gabc[3,2], hm_c)
+Colorbar(gabc[3,4], hm_d)
+hidexdecorations!(ax_a, ticks = false)
+hidexdecorations!(ax_b, ticks = false)
+hidexdecorations!(ax_c, ticks = false)
+hidexdecorations!(ax_d, ticks = false)
+hideydecorations!(ax_b, ticks = false)
+hideydecorations!(ax_d, ticks = false)
+
+# T̄ = (mean(snapshot[:T], dims = 2));
+# w̄ = (mean(snapshot[:w], dims = 2));
+# ū = (mean(snapshot[:u], dims = 2));
+# v̄ = (mean(snapshot[:v], dims = 2));
+zmin = -75
+kz = findfirst(z .≥ zmin)
+Nz = length(z)
+axis_kwargs0 = (xlabel = L"x~\text{(km)}", ylabel = L"z~\text{(m)}", limits = (nothing, (zmin, 0)))
+axis_kwargs1 = NamedTuple{(:xlabel,:ylabel)}(axis_kwargs0)
+ax_a = Axis(gabc[2,1]; titlealign = :left, axis_kwargs0...)
+ax_b = Axis(gabc[2,3]; titlealign = :left, xlabel = L"x~\text{(km)}", limits = (nothing, (zmin, 0)))
+ax_c = Axis(gabc[4,1]; titlealign = :left,  limits = (nothing, (zmin, 0)), axis_kwargs1...)
+ax_d = Axis(gabc[4,3]; titlealign = :left, xlabel = L"x~\text{(km)}", limits = (nothing, (zmin, 0)))
+wmax,umax,vmax=0.01,0.1,0.2
+hm_a = heatmap!(ax_a, 1e-3x, z[kz:Nz], (interior(snapshot[:T],:,3*640,kz:Nz)); rasterize = true, colormap = Tmap)#, colorrange = (vmin, vmax))
+hm_b = heatmap!(ax_b, 1e-3x, zw[kz:Nz], (interior(snapshot[:w],:,3*640,kz:Nz)); rasterize = true, colormap = wmap, colorrange = (-wmax, wmax))
+hm_c = heatmap!(ax_c, 1e-3x, z[kz:Nz], (interior(snapshot[:u],:,3*640,kz:Nz)); rasterize = true, colormap = vmap, colorrange = (-umax, umax))
+hm_d = heatmap!(ax_d, 1e-3x, z[kz:Nz], (interior(snapshot[:v],:,3*640,kz:Nz)); rasterize = true, colormap = vmap, colorrange = (-vmax, vmax))
+hideydecorations!(ax_b, ticks = false)
+hideydecorations!(ax_d, ticks = false)
+Colorbar(gabc[2,2], hm_a)
+Colorbar(gabc[2,4], hm_b)
+Colorbar(gabc[4,2], hm_c)
+Colorbar(gabc[4,4], hm_d)
+rowgap!(gabc, 4)
+colgap!(gabc, 1, 1)
+colgap!(gabc, 3, 1)
+colgap!(gabc, 2, 5)
+for row = [2,4]
+    rowsize!(gabc, row, Relative(0.14))
+end
+resize_to_layout!(fig)
+save(filesave * "Twuv_" * fileparam * "_3d_iter$(iteration).pdf", fig; pt_per_unit = 1)
+println("Finished plotting Twuv fields")
+
+### -------------------------------------------------------------------------
 
 ########################
 # Compute the horizontal spectrum of T, u, v, w 

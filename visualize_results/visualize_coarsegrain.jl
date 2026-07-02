@@ -34,14 +34,16 @@ filename = filehead * "hydrostatic_snapshots_" * fileparams * ".jld2"
 metadata = filehead * "experiment_" * fileparams * "_metadata.jld2"
 filesave = "./figures/"
 
-initfile = filehead * "hydrostatic_snapshots_hydrostatic_background.jld2"
+# initfile = filehead * "hydrostatic_snapshots_hydrostatic_background.jld2"
 
 # load all the data!!
 println("Loading data from $filename...")
 snapshots = load_snapshots(filename; metadata)
-initsnaps = load_snapshots(initfile)
-u0 = initsnaps[:u][1]
-v0 = initsnaps[:v][1]
+# initsnaps = load_snapshots(initfile)
+# u0 = initsnaps[:u][1]
+# v0 = initsnaps[:v][1]
+u0 = snapshots[:u][1]
+v0 = snapshots[:v][1]
 
 # Let's pick the last snapshot!
 times = snapshots[:T].times
@@ -50,7 +52,7 @@ nday = @sprintf("%2.0f", (times[snapshot_number])/60^2/24)
 println("Plotting snapshot $snapshot_number on day $(nday)...")
 
 ### Plot the coarse-grained cross-scale fluxes 
-u̅l, v̅l, w̅l, Πhl, Πvl = coarse_grained_fluxes(snapshots, snapshot_number; u0, v0, cutoff = 4kilometer)
+u̅l, v̅l, w̅l, Πhl, Πvl = coarse_grained_fluxes(snapshots, u0, v0, snapshot_number; cutoff = 4kilometer)
 Πhl = compute!(Field(Πhl))
 Πvl = compute!(Field(Πvl))
 
@@ -58,7 +60,7 @@ u̅l, v̅l, w̅l, Πhl, Πvl = coarse_grained_fluxes(snapshots, snapshot_number;
 Π̅v = [mean(Πvl, dims = (1,2))]
 
 for l = [2,6,8,10,12,14,16,18,20]
-    _, _, _, Πhl, Πvl = coarse_grained_fluxes(snapshots, snapshot_number; u0, v0, cutoff = 1e3l)
+    _, _, _, Πhl, Πvl = coarse_grained_fluxes(snapshots, u0, v0, snapshot_number; cutoff = 1e3l)
     Πhl = compute!(Field(Πhl))
     Πvl = compute!(Field(Πvl))
     push!(Π̅h, mean(Πhl, dims = (1,2)))
