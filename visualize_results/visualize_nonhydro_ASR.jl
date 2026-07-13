@@ -27,31 +27,6 @@ dy = 4.88281                    # [m] horizontal grid size
 dz = 1.125                      # [m] vertical grid size
 
 # --- Helper Functions ---
-function get_iterations_regex(filehead, fileparam, directory="."; subdirparam="subdomains", rank = 1008)
-    subdir = joinpath(directory, filehead * subdirparam)
-    
-    if !isdir(subdir)
-        return Int[]
-    end
-    
-    files = readdir(subdir)
-    if subdirparam == "subdomains"
-        pattern = Regex("^" * escape_string(fileparam) * "_snapshot_iter(\\d+)\\.jld2\$")
-    elseif subdirparam[1:4] == "iter"
-        pattern = Regex("^" * escape_string(fileparam) * "_$(rank)_iteration(\\d+)\\.jld2\$")
-    end
-    
-    iterations = Int[]
-    
-    for file in files
-        m = match(pattern, file)
-        if m !== nothing
-            push!(iterations, parse(Int, m.captures[1]))
-        end
-    end
-    
-    return sort(iterations)
-end
 
 ## Compute vorticity (\zeta) from 2D u and v velocity matrices
 ## \zeta = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y}
@@ -81,17 +56,12 @@ function plot_w(snapshot)
     ax_b = Axis(gab[1,3]; titlealign = :left, title=L"\text{(b)}", xlabel=L"10^6\langle\text{KE}_w\rangle~\text{(m^2~s^{-2})}",limits=(nothing,(-90,0)))
     hm_a = heatmap!(ax_a, 1e-3x, z, 1e3interior(snapshot[:w], :, 1497, :); rasterize = true, colormap = :delta, colorrange = (-20, 20))
     Colorbar(gab[1,2], hm_a)
-    # lines!(ax_a, 1e-3x, -interior(snapshot[:BLD], :, 1497, 1), color = :black, linewidth = 0.5, alpha=0.8)
-    #lines!(ax_a, 1e-3x, -interior(snapshot[:MLD], :, 1497, 1), color = :red, linewidth = 1)
-    #lines!(ax_a, 1e-3x, -interior(snapshot[:MLD2], :, 1497, 1), color = :blue, linewidth = 1)
-    # lines!(ax_a, 1e-3x, -interior(snapshot[:MLD3], :, 1497, 1), color = :green, linewidth = 1)
     vlines!(ax_a, 1e-3x[[2004,1004,3004]], color = [:orange, :green, :purple], linewidth = 0.8)
     hideydecorations!(ax_b, ticks = false)
     lines!(ax_b, 1e6*vec(mean(interior(snapshot[:w], :, 1497, :).^2/2, dims =(1))), z; linewidth = 1)
     lines!(ax_b, 1e6*interior(snapshot[:w], 2004, 1497, :).^2/2, z; linewidth = 1)
     lines!(ax_b, 1e6*interior(snapshot[:w], 1004, 1497, :).^2/2, z; linewidth = 1)
     lines!(ax_b, 1e6*interior(snapshot[:w], 3004, 1497, :).^2/2, z; linewidth = 1)
-    # hlines!(ax_b, -interior(snapshot[:BLD], :, 1497, 1)[[2004,1004,3004]], linestyle = :dash, color = [:orange, :green, :purple], linewidth = 0.8)
     colsize!(gab, 3, Relative(0.3))
     colgap!(gab, 1, 1)
     resize_to_layout!(fig)
@@ -99,7 +69,6 @@ function plot_w(snapshot)
     println("Finished plotting w fields")
 end
 
-### -------------------------------------------------------------------------
 ## Plots horizontal and vertical slices of T, w, u, v fields at a specified iteration
 ## depth? 
 ## part at which vertical slice is made? 
@@ -108,12 +77,11 @@ end
 # output_filename = filehead * "subdomains/" * fileparam * "_snapshot_iter$(iteration).jld2"
 # # 2. Load the snapshot using the new function
 # snapshot = load_subdomain_snapshot(output_filename)
-
 function plot_Twuv(snapshot)
     # 3. Plot figure
     x, y, z = nodes(snapshot[:T]);
     _, _, zw = nodes(snapshot[:w]);
-    k = 72
+    k = 72      # takes surface depth=0m
     Tmap, wmap, vmap = :thermal,:delta,:balance
     wmax,umax,vmax=0.01,0.15,0.2
     #fig = Figure(size = (640, 450))
@@ -176,6 +144,9 @@ function plot_Twuv(snapshot)
     println("Finished plotting Twuv fields")
 end
 
+### -------------------------------------------------------------------------
+
+## Plots the temperature heatmap for a subdomain tile with no padding or colorbar
 function plot_T_image(snapshot, fileparam; Tmin=19, Tmax=21, k=70, colormap=:thermal)
     x, y, _ = nodes(snapshot[:T])
 
@@ -185,30 +156,10 @@ function plot_T_image(snapshot, fileparam; Tmin=19, Tmax=21, k=70, colormap=:the
 
     hm = heatmap!(ax, 1e-3x, 1e-3y, interior(snapshot[:T], :, :, k);
              rasterize = true, colormap = colormap,
-            # )
              colorrange = (Tmin, Tmax))
+            # )
 
     # Colorbar(fig[1, 2], hm)             # if you want colorbar
-
-    # # ----------------------------------------------------------
-    # # Select only the core region, excluding the halo
-    # core_xlims = snapshot[:core_xlims]   # adjust key name to match how you saved it
-    # core_ylims = snapshot[:core_ylims]
-
-    # ix = findall(xi -> core_xlims[1] <= xi <= core_xlims[2], x)
-    # iy = findall(yi -> core_ylims[1] <= yi <= core_ylims[2], y)
-
-    # x_core = x[ix]
-    # y_core = y[iy]
-    # T_core = interior(snapshot[:T], ix, iy, k)
-
-    # fig = Figure(size = (700, 640))
-    # ax = Axis(fig[1, 1]; aspect = DataAspect())
-
-    # hm = heatmap!(ax, 1e-3x_core, 1e-3y_core, T_core;
-    #               rasterize = true, colormap = colormap,
-    #               colorrange = (Tmin, Tmax))
-    # # ----------------------------------------------------------
 
     hidedecorations!(ax)
     hidespines!(ax)
@@ -218,6 +169,7 @@ function plot_T_image(snapshot, fileparam; Tmin=19, Tmax=21, k=70, colormap=:the
     println("Finished plotting T heatmap")
 end
 
+## Plots the colorbar for a heatmap of temperature for a subdomain tile
 function plot_T_colorbar(; Tmin=19, Tmax=21, colormap=:thermal, vertical=true)
     fig = Figure(size = vertical ? (120, 500) : (500, 120), figure_padding = 5)
 
@@ -229,6 +181,8 @@ function plot_T_colorbar(; Tmin=19, Tmax=21, colormap=:thermal, vertical=true)
     println("Finished plotting T colorbar")
 end
 
+## Plots the heatmap for a subdomain tile with no padding or colorbar
+# available variables: u, v, w, vort
 function plot_image(snapshot, var, fileparam; Tmin=19, Tmax=21, k=70, colormap=:thermal)
     if (var == :vort)
         x, y, _ = nodes(snapshot[:T])
@@ -268,13 +222,13 @@ function plot_image(snapshot, var, fileparam; Tmin=19, Tmax=21, k=70, colormap=:
 
         hm = heatmap!(ax, 1e-3x, 1e-3y, field;
                 rasterize = true, colormap = colormap,
-                # )
                  colorrange = (Tmin, Tmax))
+                # )
     else
         hm = heatmap!(ax, 1e-3x, 1e-3y, interior(snapshot[var], :, :, k);
                 rasterize = true, colormap = colormap,
-                # )
                  colorrange = (Tmin, Tmax))
+                # )
     end
 
     # Colorbar(fig[1, 2], hm)             # if you want colorbar
@@ -287,6 +241,8 @@ function plot_image(snapshot, var, fileparam; Tmin=19, Tmax=21, k=70, colormap=:
     println("Finished plotting " * varlabel * " heatmap")
 end
 
+## Plots the colorbar for a heatmap of temperature for a subdomain tile
+# available variables: u, v, w, vort
 function plot_colorbar(var; Tmin=19, Tmax=21, colormap=:thermal, vertical=true)
     fig = Figure(size = vertical ? (120, 500) : (500, 120), figure_padding = 5)
 
@@ -315,11 +271,9 @@ function plot_colorbar(var; Tmin=19, Tmax=21, colormap=:thermal, vertical=true)
         axlabel = "unknown"
         colormap = :dense
     end
-
-    # limits = (Tmin, Tmax), 
+ 
     Colorbar(fig[1, 1]; limits = (Tmin, Tmax), colormap = colormap,
               vertical = vertical, label = axlabel)
-            #   L"T~\text{({^\circ}C)}"
 
     save(filesave * varlabel * "_colorbar_iter$(iteration).png", fig; px_per_unit = 4)
     println("Finished plotting " * varlabel * " colorbar")
@@ -327,7 +281,7 @@ end
 
 ### -------------------------------------------------------------------------
 
-# ### Loop through multiple files
+# ### Loop through multiple files and plot w, Twuv using Shirui's functions 
 # # Get names of matching files in that specific folder
 # file_arr = filter(f -> startswith(f, "subdomain"), readdir(filehead))
 # println(file_arr)
@@ -347,24 +301,8 @@ end
 #     # plot_Twuv(snapshot)
 # end
 
-# ### -------------------------------------------------------------------------
-# ## Process a single file
-
-# fileparam = "subdomain4" 
-# iteration = 164410 # [32207, 37003, 49086, 52543, 72635, 164410] 
-# # 1. Define the filename of the saved snapshot
-# # output_filename = filehead * fileparam * "_snapshot_iter$(iteration).jld2"
-# output_filename = filehead * fileparam * "_iter$(iteration).jld2"
-
-# # 2. Load the snapshot using the new function
-# snapshot = load_subdomain_snapshot(output_filename);
-
-# # # 3. Plot figure
-# # plot_w(snapshot)
-# # plot_Twuv(snapshot)
-
 ### -------------------------------------------------------------------------
-## Plot the temperature plots of the entire domain by plotting each subdomain
+## Plot the heatmap plots of each subdomain tile
 
 # 1. Define file parameters
 # Loop over subdomain files
@@ -374,7 +312,7 @@ println("Iteration: $(iteration)")
 max_T = 0.0
 min_T = 1000.0
 
-for i in 72:100
+for i in 1:100
     println("--- Subdomain $(i) ---")
 
     # 2. Define the filename of the saved snapshot
@@ -394,7 +332,6 @@ for i in 72:100
 
     # 4. Plot figure
     # plot_T_image(snapshot, fileparam; Tmin=19.5, Tmax=20.1)
-
     # plot_image(snapshot, :u, fileparam; k=70)
     # plot_image(snapshot, :v, fileparam; k=70)
     plot_image(snapshot, :w, fileparam; k=70)
