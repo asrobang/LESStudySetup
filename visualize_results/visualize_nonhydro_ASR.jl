@@ -9,8 +9,8 @@ set_theme!(theme_latexfonts(), fontsize=12, figure_padding = 10)
 using JLD2 #, CUDA
 
 # --- Set file directories ---
-filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains/" 
-filesave = "figures/nonhydro/"
+filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/" 
+filesave = "figures/20260708_nhy_frontanalysis/"
 
 # --- Set parameters ---
 set_value!(; Δh = 4.8828125)    # horizontal spacing
@@ -22,6 +22,9 @@ cₚ = parameters.cp              # heat capacity
 α = parameters.α                # thermal expansion
 g = parameters.g                # gravity
 wₛ = (α * g * Q * h₀ / (ρ₀ * cₚ))^(1/3)     # convective velocity scale [m/s]?
+dx = 4.88281                    # [m] horizontal grid size
+dy = 4.88281                    # [m] horizontal grid size
+dz = 1.125                      # [m] vertical grid size
 
 # --- Helper Functions ---
 function get_iterations_regex(filehead, fileparam, directory="."; subdirparam="subdomains", rank = 1008)
@@ -48,6 +51,22 @@ function get_iterations_regex(filehead, fileparam, directory="."; subdirparam="s
     end
     
     return sort(iterations)
+end
+
+## Compute vorticity (\zeta) from 2D u and v velocity matrices
+## \zeta = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y}
+## assumes uniform constant dx and dy
+function vorticity2d(u,v,dx,dy) 
+    # commented out because u and v fields are already padded 
+    # u field: 2049 x 2048 Matrix{Float32}
+    # v field: 2048 x 2049 Matrix{Float32}
+    # v_pad = hcat(v, v[:, 1:1])      # pad the first column at the rightmost (Ny,Nx+1)
+    # u_pad = vcat(u, u[1:1, :])      # pad the first row at the bottom (Ny+1,Nx)
+    dvdx = (v[:, 2:end] .- v[:, 1:end-1]) ./ dx
+    dudy = (u[2:end, :] .- u[1:end-1, :]) ./ dy
+    vort = dvdx .- dudy
+
+    return vort
 end
 
 ### -------------------------------------------------------------------------
@@ -90,7 +109,7 @@ end
 # # 2. Load the snapshot using the new function
 # snapshot = load_subdomain_snapshot(output_filename)
 
-function plot_Twxyz(snapshot)
+function plot_Twuv(snapshot)
     # 3. Plot figure
     x, y, z = nodes(snapshot[:T]);
     _, _, zw = nodes(snapshot[:w]);
@@ -157,6 +176,155 @@ function plot_Twxyz(snapshot)
     println("Finished plotting Twuv fields")
 end
 
+function plot_T_image(snapshot, fileparam; Tmin=19, Tmax=21, k=70, colormap=:thermal)
+    x, y, _ = nodes(snapshot[:T])
+
+    fig = Figure(size = (640, 640), figure_padding = 0)
+    # fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect())
+
+    hm = heatmap!(ax, 1e-3x, 1e-3y, interior(snapshot[:T], :, :, k);
+             rasterize = true, colormap = colormap,
+            # )
+             colorrange = (Tmin, Tmax))
+
+    # Colorbar(fig[1, 2], hm)             # if you want colorbar
+
+    # # ----------------------------------------------------------
+    # # Select only the core region, excluding the halo
+    # core_xlims = snapshot[:core_xlims]   # adjust key name to match how you saved it
+    # core_ylims = snapshot[:core_ylims]
+
+    # ix = findall(xi -> core_xlims[1] <= xi <= core_xlims[2], x)
+    # iy = findall(yi -> core_ylims[1] <= yi <= core_ylims[2], y)
+
+    # x_core = x[ix]
+    # y_core = y[iy]
+    # T_core = interior(snapshot[:T], ix, iy, k)
+
+    # fig = Figure(size = (700, 640))
+    # ax = Axis(fig[1, 1]; aspect = DataAspect())
+
+    # hm = heatmap!(ax, 1e-3x_core, 1e-3y_core, T_core;
+    #               rasterize = true, colormap = colormap,
+    #               colorrange = (Tmin, Tmax))
+    # # ----------------------------------------------------------
+
+    hidedecorations!(ax)
+    hidespines!(ax)
+    tightlimits!(ax)
+
+    save(filesave * "T_" * fileparam * "_iter$(iteration).png", fig; px_per_unit = 4)
+    println("Finished plotting T heatmap")
+end
+
+function plot_T_colorbar(; Tmin=19, Tmax=21, colormap=:thermal, vertical=true)
+    fig = Figure(size = vertical ? (120, 500) : (500, 120), figure_padding = 5)
+
+    # limits = (Tmin, Tmax), 
+    Colorbar(fig[1, 1]; limits = (Tmin, Tmax), colormap = colormap,
+              vertical = vertical, label = L"T~\text{({^\circ}C)}")
+
+    save(filesave * "T_colorbar_iter$(iteration).png", fig; px_per_unit = 4)
+    println("Finished plotting T colorbar")
+end
+
+function plot_image(snapshot, var, fileparam; Tmin=19, Tmax=21, k=70, colormap=:thermal)
+    if (var == :vort)
+        x, y, _ = nodes(snapshot[:T])
+    else
+        x, y, _ = nodes(snapshot[var])
+    end
+
+    fig = Figure(size = (640, 640), figure_padding = 0)
+    # fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect())
+
+    if (var == :u)
+        varlabel = "u"
+        colormap = :balance
+        Tmin, Tmax = -0.4, 0.4
+    elseif (var == :v)
+        varlabel = "v"
+        colormap = :balance
+        Tmin, Tmax = -0.4, 0.4
+    elseif (var == :w)
+        varlabel = "w"
+        colormap = :delta
+        Tmin, Tmax = -0.05, 0.05
+    elseif (var == :vort)
+        varlabel = "vort"
+        colormap = :curl
+        Tmin, Tmax = -0.05, 0.05
+    else
+        varlabel = "unknown"
+        colormap = :dense
+    end
+
+    if (var == :vort)
+        whole_u = copy(interior(snapshot[:u],:,:,k))
+        whole_v = copy(interior(snapshot[:v],:,:,k))
+        field = vorticity2d(whole_u,whole_v,dx,dy)
+
+        hm = heatmap!(ax, 1e-3x, 1e-3y, field;
+                rasterize = true, colormap = colormap,
+                # )
+                 colorrange = (Tmin, Tmax))
+    else
+        hm = heatmap!(ax, 1e-3x, 1e-3y, interior(snapshot[var], :, :, k);
+                rasterize = true, colormap = colormap,
+                # )
+                 colorrange = (Tmin, Tmax))
+    end
+
+    # Colorbar(fig[1, 2], hm)             # if you want colorbar
+
+    hidedecorations!(ax)
+    hidespines!(ax)
+    tightlimits!(ax)
+
+    save(filesave * varlabel * "_" * fileparam * "_iter$(iteration).png", fig; px_per_unit = 4)
+    println("Finished plotting " * varlabel * " heatmap")
+end
+
+function plot_colorbar(var; Tmin=19, Tmax=21, colormap=:thermal, vertical=true)
+    fig = Figure(size = vertical ? (120, 500) : (500, 120), figure_padding = 5)
+
+    if (var == :u)
+        varlabel = "u"
+        axlabel = L"u~\text{(m/s)}"
+        colormap = :balance
+        Tmin, Tmax = -0.4, 0.4
+    elseif (var == :v)
+        varlabel = "v"
+        axlabel = L"v~\text{(m/s)}"
+        colormap = :balance
+        Tmin, Tmax = -0.4, 0.4
+    elseif (var == :w)
+        varlabel = "w"
+        axlabel = L"w~\text{(m/s)}"
+        colormap = :delta
+        Tmin, Tmax = -0.05, 0.05
+    elseif (var == :vort)
+        varlabel = "vort"
+        axlabel = L"\text{vorticity}"
+        colormap = :curl
+        Tmin, Tmax = -0.05, 0.05
+    else
+        varlabel = "unknown"
+        axlabel = "unknown"
+        colormap = :dense
+    end
+
+    # limits = (Tmin, Tmax), 
+    Colorbar(fig[1, 1]; limits = (Tmin, Tmax), colormap = colormap,
+              vertical = vertical, label = axlabel)
+            #   L"T~\text{({^\circ}C)}"
+
+    save(filesave * varlabel * "_colorbar_iter$(iteration).png", fig; px_per_unit = 4)
+    println("Finished plotting " * varlabel * " colorbar")
+end
+
 ### -------------------------------------------------------------------------
 
 # ### Loop through multiple files
@@ -176,19 +344,68 @@ end
 
 #     # # 3. Plot figure
 #     # plot_w(snapshot)
-#     # plot_Twxyz(snapshot)
+#     # plot_Twuv(snapshot)
 # end
 
-### Process a single file
-fileparam = "subdomain4" 
-iteration = 164410 # [32207, 37003, 49086, 52543, 72635, 164410] 
-# 1. Define the filename of the saved snapshot
-# output_filename = filehead * fileparam * "_snapshot_iter$(iteration).jld2"
-output_filename = filehead * fileparam * "_iter$(iteration).jld2"
+# ### -------------------------------------------------------------------------
+# ## Process a single file
 
-# 2. Load the snapshot using the new function
-snapshot = load_subdomain_snapshot(output_filename)
+# fileparam = "subdomain4" 
+# iteration = 164410 # [32207, 37003, 49086, 52543, 72635, 164410] 
+# # 1. Define the filename of the saved snapshot
+# # output_filename = filehead * fileparam * "_snapshot_iter$(iteration).jld2"
+# output_filename = filehead * fileparam * "_iter$(iteration).jld2"
 
-# # 3. Plot figure
-# plot_w(snapshot)
-plot_Twxyz(snapshot)
+# # 2. Load the snapshot using the new function
+# snapshot = load_subdomain_snapshot(output_filename);
+
+# # # 3. Plot figure
+# # plot_w(snapshot)
+# # plot_Twuv(snapshot)
+
+### -------------------------------------------------------------------------
+## Plot the temperature plots of the entire domain by plotting each subdomain
+
+# 1. Define file parameters
+# Loop over subdomain files
+iteration = 164410
+println("Iteration: $(iteration)")
+
+max_T = 0.0
+min_T = 1000.0
+
+for i in 72:100
+    println("--- Subdomain $(i) ---")
+
+    # 2. Define the filename of the saved snapshot
+    fileparam = "subdomain" * string(i)
+    output_filename = filehead * fileparam * "_iter$(iteration).jld2"
+
+    # 3. Load the snapshot
+    snapshot = load_subdomain_snapshot(output_filename)
+
+    # # update max and min T
+    # curr_max = maximum(snapshot[:T])
+    # curr_min = minimum(snapshot[:T])
+    # global max_T = max(max_T, curr_max)
+    # global min_T = min(min_T, curr_min)
+    # println("Max T so far: $(max_T)")
+    # println("Min T so far: $(min_T)")
+
+    # 4. Plot figure
+    # plot_T_image(snapshot, fileparam; Tmin=19.5, Tmax=20.1)
+
+    # plot_image(snapshot, :u, fileparam; k=70)
+    # plot_image(snapshot, :v, fileparam; k=70)
+    plot_image(snapshot, :w, fileparam; k=70)
+    plot_image(snapshot, :vort, fileparam; k=70)
+end
+
+# println("FINAL Max T: $(max_T)")
+# println("FINAL Min T: $(min_T)")
+
+# plot_T_colorbar(; Tmin=19.5, Tmax=20.1)
+plot_colorbar(:u)
+plot_colorbar(:v)
+plot_colorbar(:w)
+plot_colorbar(:vort)
