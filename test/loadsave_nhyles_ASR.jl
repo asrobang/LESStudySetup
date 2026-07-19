@@ -39,11 +39,11 @@ using CairoMakie.Makie.Colors: RGB, RGBA, red, green, blue
 
 # --- Data Paths ---
 const CHECKPOINT_DIR = "/orcd/data/abodner/002/shared_datasets/nhyles_output/"
-const CHECKPOINT_PREFIX = CHECKPOINT_DIR * "iteration6x/nonhydrostatic_checkpoint_"
+const CHECKPOINT_PREFIX = CHECKPOINT_DIR * "iteration16x/nonhydrostatic_checkpoint_"
 const OUTPUT_DIR = CHECKPOINT_DIR * "subdomains_ASR/"
 
 # --- Checkpoint Selection ---
-const ITERATION = 62484    
+const ITERATION = 164410
 # iteration11x, iteration 113103 is 5.0 days = 432000 seconds
 # iteration14x, iteration 143293 is 6.5 days = 561600 seconds
 # iteration16x, iteration 164410 is 7.5 days = 648000 seconds
@@ -56,7 +56,7 @@ const Z_LIMITS = (-81.0, 0.0)     # Vertical extent (m): 72 cells at dz=1.125m
 
 # --- Coarse-Graining Parameters ---
 const KERNEL = :gaussian          # Filter kernel: :gaussian, :tophat, or :lanczos
-const CUTOFF = 0.0 #300.0              # Filter cutoff scale (m) used when saving tiles, ! ! ! changed to 0
+const CUTOFF = 300.0              # Filter cutoff scale (m) used when saving tiles, ! ! ! changed to 0
 const BORDER = :reflect           # Boundary handling: :reflect, :circular
 
 # Halo width = 2x cutoff for Gaussian (captures >95% of kernel weight)
@@ -106,7 +106,7 @@ const QUADRANT_COLORS = [RGB(0.894, 0.102, 0.110),   # Q1: red - warm updrafts
                          RGB(0.596, 0.306, 0.639)]   # Q4: purple - cold updrafts
 
 # --- Processing Options ---
-const SAVE_ALL_TILES = true      # Set false to skip tile extraction step
+const SAVE_ALL_TILES = false      # Set false to skip tile extraction step
 const TARGET_TILE = 5             # Which tile to process for coarse-graining
 
 # ===============================================================================
@@ -344,94 +344,94 @@ else
     println("\n[Skipping tile extraction - SAVE_ALL_TILES = false]")
 end
 
-# # ===============================================================================
-# # SECTION 5: LOAD TILE AND PERFORM COARSE-GRAINING
-# # ===============================================================================
+# ===============================================================================
+# SECTION 5: LOAD TILE AND PERFORM COARSE-GRAINING
+# ===============================================================================
 
-# println("\n" * "="^70)
-# println("STEP 4: Coarse-Graining Tile $TARGET_TILE")
-# println("="^70)
+println("\n" * "="^70)
+println("STEP 4: Coarse-Graining Tile $TARGET_TILE")
+println("="^70)
 
-# input_file = OUTPUT_DIR * "subdomain$(TARGET_TILE)_iter$(ITERATION).jld2"
-# println("Loading: $input_file")
+input_file = OUTPUT_DIR * "subdomain$(TARGET_TILE)_iter$(ITERATION).jld2"
+println("Loading: $input_file")
 
-# snapshot = load_subdomain_snapshot(input_file; variables = ("w", "T"))
+snapshot = load_subdomain_snapshot(input_file; variables = ("w", "T"))
 
-# # Warn if using a larger-than-default filter cutoff
-# if FILTER_CUTOFF > 300.0
-#     println("⚠️  WARNING: Filter cutoff ($FILTER_CUTOFF m) is larger than default (300 m).")
-# end
+# Warn if using a larger-than-default filter cutoff
+if FILTER_CUTOFF > 300.0
+    println("⚠️  WARNING: Filter cutoff ($FILTER_CUTOFF m) is larger than default (300 m).")
+end
 
-# # Determine if reload is needed due to larger filter cutoff
-# required_halo = 2 * FILTER_CUTOFF
-# active_halo_width = HALO_WIDTH  # Default: use saved halo
+# Determine if reload is needed due to larger filter cutoff
+required_halo = 2 * FILTER_CUTOFF
+active_halo_width = HALO_WIDTH  # Default: use saved halo
 
-# if required_halo > HALO_WIDTH
-#     @warn "FILTER_CUTOFF=$FILTER_CUTOFF requires halo=$(required_halo)m, " *
-#           "but tile was saved with halo=$(HALO_WIDTH)m."
+if required_halo > HALO_WIDTH
+    @warn "FILTER_CUTOFF=$FILTER_CUTOFF requires halo=$(required_halo)m, " *
+          "but tile was saved with halo=$(HALO_WIDTH)m."
     
-#     # Get tile info for reload
-#     tile = tiles[TARGET_TILE]
+    # Get tile info for reload
+    tile = tiles[TARGET_TILE]
     
-#     # Check if a previously saved tile with larger halo exists
-#     reloaded_file = OUTPUT_DIR * "subdomain$(TARGET_TILE)_iter$(ITERATION)_halo$(Int(required_halo)).jld2"
+    # Check if a previously saved tile with larger halo exists
+    reloaded_file = OUTPUT_DIR * "subdomain$(TARGET_TILE)_iter$(ITERATION)_halo$(Int(required_halo)).jld2"
     
-#     if isfile(reloaded_file)
-#         # Load from existing file with larger halo
-#         println("Loading existing tile with larger halo: $reloaded_file")
-#         snapshot = load_subdomain_snapshot(reloaded_file; variables = ("w", "T"))
-#     else
-#         # Reload from checkpoint
-#         println("Reloading tile $(TARGET_TILE) from checkpoint with halo=$(required_halo)m...")
+    if isfile(reloaded_file)
+        # Load from existing file with larger halo
+        println("Loading existing tile with larger halo: $reloaded_file")
+        snapshot = load_subdomain_snapshot(reloaded_file; variables = ("w", "T"))
+    else
+        # Reload from checkpoint
+        println("Reloading tile $(TARGET_TILE) from checkpoint with halo=$(required_halo)m...")
         
-#         # Compute expanded limits with larger halo
-#         expanded_xlims = (tile.core_xlims[1] - required_halo, tile.core_xlims[2] + required_halo)
-#         expanded_ylims = (tile.core_ylims[1] - required_halo, tile.core_ylims[2] + required_halo)
+        # Compute expanded limits with larger halo
+        expanded_xlims = (tile.core_xlims[1] - required_halo, tile.core_xlims[2] + required_halo)
+        expanded_ylims = (tile.core_ylims[1] - required_halo, tile.core_ylims[2] + required_halo)
         
-#         snapshot = load_distributed_checkpoint_subdomain(CHECKPOINT_PREFIX, ITERATION;
-#             xlims = expanded_xlims,
-#             ylims = expanded_ylims,
-#             zlims = Z_LIMITS,
-#             getEw = false,
-#             getMLD = 0
-#         )
+        snapshot = load_distributed_checkpoint_subdomain(CHECKPOINT_PREFIX, ITERATION;
+            xlims = expanded_xlims,
+            ylims = expanded_ylims,
+            zlims = Z_LIMITS,
+            getEw = false,
+            getMLD = 0
+        )
         
-#         # Optionally save the reloaded tile with larger halo
-#         if SAVE_RELOADED_TILE
-#             println("Saving reloaded tile to: $reloaded_file")
-#             save_subdomain_with_halo(reloaded_file, snapshot;
-#                 core_xlims = tile.core_xlims,
-#                 core_ylims = tile.core_ylims,
-#                 halo_width = required_halo,
-#                 zlims = Z_LIMITS,
-#                 iteration = ITERATION,
-#                 clock_time = clock_info.time,
-#                 clock_time_days = clock_info.time_days
-#             )
-#         end
-#     end
+        # Optionally save the reloaded tile with larger halo
+        if SAVE_RELOADED_TILE
+            println("Saving reloaded tile to: $reloaded_file")
+            save_subdomain_with_halo(reloaded_file, snapshot;
+                core_xlims = tile.core_xlims,
+                core_ylims = tile.core_ylims,
+                halo_width = required_halo,
+                zlims = Z_LIMITS,
+                iteration = ITERATION,
+                clock_time = clock_info.time,
+                clock_time_days = clock_info.time_days
+            )
+        end
+    end
     
-#     # Update active halo for cropping
-#     active_halo_width = required_halo
-# end
+    # Update active halo for cropping
+    active_halo_width = required_halo
+end
 
-# # Display loaded metadata
-# grid = snapshot[:grid]
-# println("\nLoaded subdomain:")
-# println("  * Grid size: $(grid.Nx) x $(grid.Ny) x $(grid.Nz) cells")
-# println("  * Resolution: dx=$(grid.Δxᶜᵃᵃ)m, dz=$(grid.Lz / grid.Nz)m")
+# Display loaded metadata
+grid = snapshot[:grid]
+println("\nLoaded subdomain:")
+println("  * Grid size: $(grid.Nx) x $(grid.Ny) x $(grid.Nz) cells")
+println("  * Resolution: dx=$(grid.Δxᶜᵃᵃ)m, dz=$(grid.Lz / grid.Nz)m")
 
-# if haskey(snapshot, :clock_time_days)
-#     println("  * Simulation time: $(round(snapshot[:clock_time_days], digits=3)) days")
-# end
-# if haskey(snapshot, :core_xlims)
-#     println("  * Core region (valid after filtering):")
-#     println("      x: $(snapshot[:core_xlims]) m")
-#     println("      y: $(snapshot[:core_ylims]) m")
-# end
-# if haskey(snapshot, :halo_width)
-#     println("  * Halo width: $(snapshot[:halo_width]) m")
-# end
+if haskey(snapshot, :clock_time_days)
+    println("  * Simulation time: $(round(snapshot[:clock_time_days], digits=3)) days")
+end
+if haskey(snapshot, :core_xlims)
+    println("  * Core region (valid after filtering):")
+    println("      x: $(snapshot[:core_xlims]) m")
+    println("      y: $(snapshot[:core_ylims]) m")
+end
+if haskey(snapshot, :halo_width)
+    println("  * Halo width: $(snapshot[:halo_width]) m")
+end
 
 # # -----------------------------------------------------------------------------
 # # Compute buoyancy from temperature

@@ -10,7 +10,7 @@ using JLD2 #, CUDA
 
 # --- Set file directories ---
 filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/" 
-filesave = "figures/20260708_nhy_frontanalysis/"
+filesave = "figures/20260708_nhy_frontanalysis/tiles/"
 
 # --- Set parameters ---
 set_value!(; Δh = 4.8828125)    # horizontal spacing
@@ -32,40 +32,47 @@ dz = 1.125                      # [m] vertical grid size
 ## \zeta = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y}
 ## assumes uniform constant dx and dy
 function vorticity2d(u,v,dx,dy) 
-    # commented out because u and v fields are already padded 
-    # u field: 2049 x 2048 Matrix{Float32}
-    # v field: 2048 x 2049 Matrix{Float32}
-    # v_pad = hcat(v, v[:, 1:1])      # pad the first column at the rightmost (Ny,Nx+1)
-    # u_pad = vcat(u, u[1:1, :])      # pad the first row at the bottom (Ny+1,Nx)
-    dvdx = (v[:, 2:end] .- v[:, 1:end-1]) ./ dx
-    dudy = (u[2:end, :] .- u[1:end-1, :]) ./ dy
+    v_pad = hcat(v, v[:, 1:1])      # pad the first column at the rightmost (Ny,Nx+1)
+    u_pad = vcat(u, u[1:1, :])      # pad the first row at the bottom (Ny+1,Nx)
+    dvdx = (v_pad[:, 2:end] .- v_pad[:, 1:end-1]) ./ dx
+    dudy = (u_pad[2:end, :] .- u_pad[1:end-1, :]) ./ dy
     vort = dvdx .- dudy
 
     return vort
 end
 
-### -------------------------------------------------------------------------
-## Plots a vertical slice of the vertical velocity w
+# ## Compute stratification (N^2) from vertical gradient of buoyancy 
+# function strat(T,dz)
+#     # ! ! ! fill in 
+#     b = (α * g) .* T
+#     N2 = ??? ./ dz # N2 = db/dz
+#     return N2
+# end
 
-function plot_w(snapshot)
+### -------------------------------------------------------------------------
+
+## Plots a vertical slice of the vertical velocity w
+function plot_w(snapshot, fileparam)
     # 3. Plot figure 
     fig = Figure(size = (640, 320))
     gab = fig[1, 1] = GridLayout()
     x, y, z = nodes(snapshot[:w]);
+    yloc = round(Int, length(y)/2)
     ax_a = Axis(gab[1,1]; titlealign = :left, title=L"\text{(a)}~w~\text{(mm s^{-1})}", xlabel=L"x~\text{(km)}", ylabel=L"z~\text{(m)}",limits=(nothing,(-90,0)))
     ax_b = Axis(gab[1,3]; titlealign = :left, title=L"\text{(b)}", xlabel=L"10^6\langle\text{KE}_w\rangle~\text{(m^2~s^{-2})}",limits=(nothing,(-90,0)))
-    hm_a = heatmap!(ax_a, 1e-3x, z, 1e3interior(snapshot[:w], :, 1497, :); rasterize = true, colormap = :delta, colorrange = (-20, 20))
+    hm_a = heatmap!(ax_a, 1e-3x, z, abs.(1e3interior(snapshot[:w], :, yloc, :)); rasterize = true, colormap = :delta, colorrange = (0, 20))
     Colorbar(gab[1,2], hm_a)
-    vlines!(ax_a, 1e-3x[[2004,1004,3004]], color = [:orange, :green, :purple], linewidth = 0.8)
+    # vlines!(ax_a, 1e-3x[[512,1024,1536]], color = [:orange, :green, :purple], linewidth = 0.8)
     hideydecorations!(ax_b, ticks = false)
-    lines!(ax_b, 1e6*vec(mean(interior(snapshot[:w], :, 1497, :).^2/2, dims =(1))), z; linewidth = 1)
-    lines!(ax_b, 1e6*interior(snapshot[:w], 2004, 1497, :).^2/2, z; linewidth = 1)
-    lines!(ax_b, 1e6*interior(snapshot[:w], 1004, 1497, :).^2/2, z; linewidth = 1)
-    lines!(ax_b, 1e6*interior(snapshot[:w], 3004, 1497, :).^2/2, z; linewidth = 1)
+    lines!(ax_b, 1e6*vec(mean(interior(snapshot[:w], :, yloc, :).^2/2, dims =(1))), z; linewidth = 1)
+    # lines!(ax_b, 1e6*interior(snapshot[:w], 512, yloc, :).^2/2, z; linewidth = 1)
+    # lines!(ax_b, 1e6*interior(snapshot[:w], 1024, yloc, :).^2/2, z; linewidth = 1)
+    # lines!(ax_b, 1e6*interior(snapshot[:w], 1536, yloc, :).^2/2, z; linewidth = 1)
+    Label(gab[0, 1:3], "Vertical velocity snapshot and turbulent KE with depth: $(fileparam)", fontsize = 12)
     colsize!(gab, 3, Relative(0.3))
     colgap!(gab, 1, 1)
     resize_to_layout!(fig)
-    save(filesave * "w_" * fileparam * "_2d_iter$(iteration).pdf", fig; pt_per_unit = 1)
+    save(filesave * "wvslice_abs_" * fileparam * "_iter$(iteration).pdf", fig; pt_per_unit = 1)
     println("Finished plotting w fields")
 end
 
@@ -73,10 +80,10 @@ end
 ## depth? 
 ## part at which vertical slice is made? 
 
-# # 1. Define the filename of the saved snapshot
-# output_filename = filehead * "subdomains/" * fileparam * "_snapshot_iter$(iteration).jld2"
-# # 2. Load the snapshot using the new function
-# snapshot = load_subdomain_snapshot(output_filename)
+## 1. Define the filename of the saved snapshot
+## output_filename = filehead * "subdomains/" * fileparam * "_snapshot_iter$(iteration).jld2"
+## 2. Load the snapshot using the new function
+## snapshot = load_subdomain_snapshot(output_filename)
 function plot_Twuv(snapshot)
     # 3. Plot figure
     x, y, z = nodes(snapshot[:T]);
@@ -160,7 +167,9 @@ function plot_T_image(snapshot, fileparam; Tmin=19, Tmax=21, k=70, colormap=:the
             # )
 
     # Colorbar(fig[1, 2], hm)             # if you want colorbar
+    # hlines!(ax, 1e-3y[round(Int, length(y)/2)], color = :white, linewidth = 2)
 
+    # comment out to bring back axes
     hidedecorations!(ax)
     hidespines!(ax)
     tightlimits!(ax)
@@ -182,12 +191,12 @@ function plot_T_colorbar(; Tmin=19, Tmax=21, colormap=:thermal, vertical=true)
 end
 
 ## Plots the heatmap for a subdomain tile with no padding or colorbar
-# available variables: u, v, w, vort
+## available variables: u, v, w, vort, vortf, hke
 function plot_image(snapshot, var, fileparam; Tmin=19, Tmax=21, k=70, colormap=:thermal)
-    if (var == :vort)
-        x, y, _ = nodes(snapshot[:T])
-    else
+    if (var == :u || var == :v || var == :w)
         x, y, _ = nodes(snapshot[var])
+    else
+        x, y, _ = nodes(snapshot[:T])
     end
 
     fig = Figure(size = (640, 640), figure_padding = 0)
@@ -210,26 +219,41 @@ function plot_image(snapshot, var, fileparam; Tmin=19, Tmax=21, k=70, colormap=:
         varlabel = "vort"
         colormap = :curl
         Tmin, Tmax = -0.05, 0.05
+    elseif (var == :vortf)
+        varlabel = "vortf"
+        colormap = :curl
+        Tmin, Tmax = -600, 600
+    elseif (var == :hke)
+        varlabel = "hke"
+        colormap = :viridis
+        Tmin, Tmax = 0.0, 0.08
     else
         varlabel = "unknown"
         colormap = :dense
     end
 
     if (var == :vort)
-        whole_u = copy(interior(snapshot[:u],:,:,k))
-        whole_v = copy(interior(snapshot[:v],:,:,k))
+        whole_u = copy(interior(snapshot[:u],:,:,k)[1:end-1, :])
+        whole_v = copy(interior(snapshot[:v],:,:,k)[:, 1:end-1])
         field = vorticity2d(whole_u,whole_v,dx,dy)
-
-        hm = heatmap!(ax, 1e-3x, 1e-3y, field;
-                rasterize = true, colormap = colormap,
-                 colorrange = (Tmin, Tmax))
-                # )
+    elseif (var == :vortf)
+        whole_u = copy(interior(snapshot[:u],:,:,k)[1:end-1, :])
+        whole_v = copy(interior(snapshot[:v],:,:,k)[:, 1:end-1])
+        field = vorticity2d(whole_u,whole_v,dx,dy) ./ f       
+    elseif (var == :hke)
+        # Extract u and v velocity fields 
+        whole_u = copy(interior(snapshot[:u],:,:,k)[1:end-1, :])
+        whole_v = copy(interior(snapshot[:v],:,:,k)[:, 1:end-1])
+        # Calculate horizontal KE
+        field = (whole_u.^2 .+ whole_v.^2) ./ 2 
     else
-        hm = heatmap!(ax, 1e-3x, 1e-3y, interior(snapshot[var], :, :, k);
+        field = interior(snapshot[var], :, :, k)
+    end
+
+    hm = heatmap!(ax, 1e-3x, 1e-3y, field;
                 rasterize = true, colormap = colormap,
                  colorrange = (Tmin, Tmax))
                 # )
-    end
 
     # Colorbar(fig[1, 2], hm)             # if you want colorbar
 
@@ -242,7 +266,7 @@ function plot_image(snapshot, var, fileparam; Tmin=19, Tmax=21, k=70, colormap=:
 end
 
 ## Plots the colorbar for a heatmap of temperature for a subdomain tile
-# available variables: u, v, w, vort
+## available variables: u, v, w, vort, vortf, hke
 function plot_colorbar(var; Tmin=19, Tmax=21, colormap=:thermal, vertical=true)
     fig = Figure(size = vertical ? (120, 500) : (500, 120), figure_padding = 5)
 
@@ -266,9 +290,18 @@ function plot_colorbar(var; Tmin=19, Tmax=21, colormap=:thermal, vertical=true)
         axlabel = L"\text{vorticity}"
         colormap = :curl
         Tmin, Tmax = -0.05, 0.05
+    elseif (var == :vortf)
+        varlabel = "vortf"
+        axlabel = L"\frac{\zeta}{f} \text{effective Rossby number}"
+        colormap = :curl
+        Tmin, Tmax = -600, 600
+    elseif (var == :hke)
+        varlabel = "hke"
+        axlabel = L"\text{horizontal KE} (J)"
+        colormap = :viridis
+        Tmin, Tmax = 0.0, 0.08
     else
         varlabel = "unknown"
-        axlabel = "unknown"
         colormap = :dense
     end
  
@@ -277,6 +310,74 @@ function plot_colorbar(var; Tmin=19, Tmax=21, colormap=:thermal, vertical=true)
 
     save(filesave * varlabel * "_colorbar_iter$(iteration).png", fig; px_per_unit = 4)
     println("Finished plotting " * varlabel * " colorbar")
+end
+
+## Plots the heatmap of a vertical slice for a subdomain tile with no padding or colorbar
+## available variables: u, v, w, vort
+## vertical slice at fixed y: cross-front slice ! preferred
+## vertical slice at fixed x: along-front slice
+function plot_vimage(snapshot, var, fileparam; Tmin=19, Tmax=21, colormap=:thermal)
+
+    # if (var == :u || var == :v || var == :w)
+    #     x, y, _ = nodes(snapshot[var])
+    # else
+    #     x, y, _ = nodes(snapshot[:T])
+    # end
+    x, y, z = nodes(snapshot[:w]);      # grid-node coordinates associated with :w
+
+    # fig = Figure(size = (640, 640), figure_padding = 0)
+    # # fig = Figure(size = (700, 640))     # if you want colorbar
+    # ax = Axis(fig[1, 1]; aspect = DataAspect())
+    fig = Figure(size = (640, 320))     # 640 pixels wide, 320 pixels high
+    gab = fig[1, 1] = GridLayout()
+    ax_a = Axis(gab[1,1];
+            titlealign = :left, 
+            title=L"\text{(a)}~w~\text{(mm s^{-1})}", 
+            xlabel=L"x~\text{(km)}",        # labels horizontal axis 
+            ylabel=L"z~\text{(m)}",         # labels vertical axis
+            limits=(nothing,(-90,0))        # z-axis limits from -90m to 0m
+            )
+    ax_b = Axis(gab[1,3]; 
+            titlealign = :left, 
+            title=L"\text{(b)}", 
+            xlabel=L"10^6\langle\text{KE}_w\rangle~\text{(m^2~s^{-2})}",    # vertical profiles of KE assoc. with w
+            limits=(nothing,(-90,0))
+            )
+
+    # 1e3 to convert w from m/s to mm/s
+    field = 1e3interior(snapshot[:w], :, 1497, :)   # use y-index 1497
+
+    # hm = heatmap!(ax, 1e-3x, 1e-3y, field;
+    #             rasterize = true, colormap = colormap,
+    #              colorrange = (Tmin, Tmax))
+    #             # )
+    hm_a = heatmap!(ax_a, 1e-3x, z, field;      # x in km, z in m
+                rasterize = true, 
+                colormap = :delta, 
+                colorrange = (-20, 20)          # colorscale between -20 and 20 mm/s
+                )
+
+    # Colorbar(fig[1, 2], hm)             # if you want colorbar
+    Colorbar(gab[1,2], hm_a)
+
+    # hidedecorations!(ax)
+    # hidespines!(ax)
+    # tightlimits!(ax)
+    # draws vertical lines at x-coordinates at indices 2004, 1004
+    vlines!(ax_a, 1e-3x[[2004,1004]], color = [:orange, :green], linewidth = 0.8)
+    
+    hideydecorations!(ax_b, ticks = false)
+    lines!(ax_b, 1e6*vec(mean(interior(snapshot[:w], :, 1497, :).^2/2, dims =(1))), z; linewidth = 1)
+    lines!(ax_b, 1e6*interior(snapshot[:w], 2004, 1497, :).^2/2, z; linewidth = 1)
+    lines!(ax_b, 1e6*interior(snapshot[:w], 1004, 1497, :).^2/2, z; linewidth = 1)
+    colsize!(gab, 3, Relative(0.3))
+    colgap!(gab, 1, 1)
+    resize_to_layout!(fig)
+
+    # save(filesave * varlabel * "_" * fileparam * "_iter$(iteration).png", fig; px_per_unit = 4)
+    # println("Finished plotting " * varlabel * " heatmap")
+    save(filesave * "w_" * fileparam * "_2d_iter$(iteration).pdf", fig; px_per_unit = 4)
+    println("Finished plotting w fields")
 end
 
 ### -------------------------------------------------------------------------
@@ -306,7 +407,7 @@ end
 
 # 1. Define file parameters
 # Loop over subdomain files
-iteration = 164410
+iteration = 62484
 println("Iteration: $(iteration)")
 
 max_T = 0.0
@@ -322,27 +423,33 @@ for i in 1:100
     # 3. Load the snapshot
     snapshot = load_subdomain_snapshot(output_filename)
 
-    # # update max and min T
-    # curr_max = maximum(snapshot[:T])
-    # curr_min = minimum(snapshot[:T])
-    # global max_T = max(max_T, curr_max)
-    # global min_T = min(min_T, curr_min)
-    # println("Max T so far: $(max_T)")
-    # println("Min T so far: $(min_T)")
+    # update max and min T
+    curr_max = maximum(snapshot[:T])
+    curr_min = minimum(snapshot[:T])
+    global max_T = max(max_T, curr_max)
+    global min_T = min(min_T, curr_min)
+    println("Max T so far: $(max_T)")
+    println("Min T so far: $(min_T)")
 
     # 4. Plot figure
-    # plot_T_image(snapshot, fileparam; Tmin=19.5, Tmax=20.1)
+    plot_T_image(snapshot, fileparam; Tmin=19.5, Tmax=20.1)
     # plot_image(snapshot, :u, fileparam; k=70)
     # plot_image(snapshot, :v, fileparam; k=70)
-    plot_image(snapshot, :w, fileparam; k=70)
-    plot_image(snapshot, :vort, fileparam; k=70)
+    # plot_image(snapshot, :w, fileparam; k=70)
+    # plot_image(snapshot, :vort, fileparam; k=70)
+    # plot_image(snapshot, :vortf, fileparam; k=70)
+    # plot_image(snapshot, :hke, fileparam; k=70)
+    # plot_w(snapshot, fileparam)
 end
 
-# println("FINAL Max T: $(max_T)")
-# println("FINAL Min T: $(min_T)")
+println("FINAL Max T: $(max_T)")
+println("FINAL Min T: $(min_T)")
 
 # plot_T_colorbar(; Tmin=19.5, Tmax=20.1)
-plot_colorbar(:u)
-plot_colorbar(:v)
-plot_colorbar(:w)
-plot_colorbar(:vort)
+# plot_colorbar(:u)
+# plot_colorbar(:v)
+# plot_colorbar(:w)
+# plot_colorbar(:vort)
+# plot_colorbar(:vortf)
+# plot_colorbar(:hke)
+
