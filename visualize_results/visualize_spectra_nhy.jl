@@ -12,6 +12,52 @@ set_theme!(Theme(fontsize = 12))
 filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/" 
 filesave = "figures/20260718_nhy_spectra/"
 
+f = parameters.f 
+
+## Computes the isotropic power spectrums of u, v, w, T
+function spectrum_uvwT(iteration, nday, subdomain, klev)
+
+    # 1. Define file parameters
+    # Loop over subdomain files
+    println("Iteration: $(iteration)")
+    println("Reading iteration $(iteration) on day $(nday)...")
+    t0 = now()
+    i = subdomain
+    println("--- Subdomain $(i) ---")
+
+    # 2. Define the filename of the saved snapshot
+    fileparam = "subdomain" * string(i)
+    output_filename = filehead * fileparam * "_iter$(iteration).jld2"
+
+    # 3. Load the snapshot
+    snapshot = load_subdomain_snapshot(output_filename)
+
+    T = snapshot[:T]
+    u = snapshot[:u]
+    v = snapshot[:v]
+    w = snapshot[:w]
+
+    println("Loading fields wall time: $((now() - t0).value/1e3) seconds.")
+
+    # Coordinate arrays
+    xu, yu, zu = nodes(u)       # u at cell faces in x
+    xv, yv, zv = nodes(v)       # v at cell faces in y
+    xw, yw, zw = nodes(w)       # w at cell faces in z
+    xT, yT, zT = nodes(T)       # T at cell centers 
+
+    # Compute the auto-spectrum (co-spectrum of field with itself) of T, u, v, w 
+    Su = isotropic_powerspectrum(interior(u, :, :, klev), interior(u, :, :, klev), xu, yu)
+    Sv = isotropic_powerspectrum(interior(v, :, :, klev), interior(v, :, :, klev), xv, yv)
+    wk = (interior(w, :, :, klev)+interior(w, :, :, klev+1))/2      # interpolates between neighboring cells to get depth of cell center
+    Sw = isotropic_powerspectrum(wk, wk, xw, yw)
+    St = isotropic_powerspectrum(interior(T, :, :, klev), interior(T, :, :, klev), xT, yT)
+
+    return St, Su, Sv, Sw
+end
+
+# ### -------------------------------------------------------------------------
+# ### Figure 1: spectra of E_T, E_u, E_v, E_w
+
 # # 1. Define file parameters
 # # Loop over subdomain files
 # iteration = 164410
@@ -36,7 +82,6 @@ filesave = "figures/20260718_nhy_spectra/"
 # v = snapshot[:v]
 # w = snapshot[:w]
 
-# f = parameters.f 
 # # ro = compute!(Field(ζ(snapshots, snapshot_number)/f))       # Rossby number: rel vorticity / f
 # # rd = compute!(Field(δ(snapshots, snapshot_number)/f))       # divergence Rossby number: divergence / f
 # # can't use Oceananigans ζ and δ computation because the subdomain snapshot is saved as a Dict
@@ -49,56 +94,13 @@ filesave = "figures/20260718_nhy_spectra/"
 # xw, yw, zw = nodes(w)       # w at cell faces in z
 # xT, yT, zT = nodes(T)       # T at cell centers
 
-function spectrum_uvwT(iteration, nday, subdomain, klev)
-
-    # 1. Define file parameters
-    # Loop over subdomain files
-    println("Iteration: $(iteration)")
-    println("Plotting iteration $(iteration) on day $(nday)...")
-    t0 = now()
-    i = subdomain
-    println("--- Subdomain $(i) ---")
-
-    # 2. Define the filename of the saved snapshot
-    fileparam = "subdomain" * string(i)
-    output_filename = filehead * fileparam * "_iter$(iteration).jld2"
-
-    # 3. Load the snapshot
-    snapshot = load_subdomain_snapshot(output_filename)
-
-    # T = snapshot[:T]
-    u = snapshot[:u]
-    # v = snapshot[:v]
-    # w = snapshot[:w]
-
-    println("Loading fields wall time: $((now() - t0).value/1e3) seconds.")
-
-    # Coordinate arrays
-    xu, yu, zu = nodes(u)       # u at cell faces in x
-    # xv, yv, zv = nodes(v)       # v at cell faces in y
-    # xw, yw, zw = nodes(w)       # w at cell faces in z
-    # xT, yT, zT = nodes(T)       # T at cell centers 
-
-    # Compute the auto-spectrum (co-spectrum of field with itself) of T, u, v, w 
-    Su = isotropic_powerspectrum(interior(u, :, :, klev), interior(u, :, :, klev), xu, yu)
-    # Sv = isotropic_powerspectrum(interior(v, :, :, klev), interior(v, :, :, klev), xv, yv)
-    # wk = (interior(w, :, :, klev)+interior(w, :, :, klev+1))/2      # interpolates between neighboring cells to get depth of cell center
-    # Sw = isotropic_powerspectrum(wk, wk, xw, yw)
-    # St = isotropic_powerspectrum(interior(T, :, :, klev), interior(T, :, :, klev), xT, yT)
-
-    return Su
-end
-
-# ### -------------------------------------------------------------------------
-# ### Figure 1: spectra of E_T, E_u, E_v, E_w
-
 # # Define axes for figures
 # # low k: oscillates over a long spatial distance, "large-scale motions"
 # # high k: oscillates over a short spatial distance, "small-scale motions"
 # axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
 #                 ylabel = L"E_i(k)/E_{T,v}(k_{min},z=-8.4375~m)",     # normalized wrt E at k_min
 #                 xscale = log10, yscale = log10,
-#                 limits = ((8e-5, 4e-2), (1e-9,1e1)))
+#                 limits = ((1e-5, 6e-2), (1e-10,1e3)))
 # axis_kwargs2 = NamedTuple{(:xlabel,:xscale,:yscale,:limits)}(axis_kwargs1)
 
 # # Plot figure
@@ -135,7 +137,7 @@ end
 
 #     # Draw reference k^(-2) and k^(-3) lines
 #     lines!(ax, Su.freq, 1e-8Su.freq.^-2, linestyle = :dash, color = :black)
-#     text!(ax, 1e-3, 1e-2; text = L"k^{-2}")
+#     text!(ax, 1e-3, 1e-1; text = L"k^{-2}")
 #     lines!(ax, Su.freq, 1e-15Su.freq.^-3, linestyle = :dash, color = :gray)
 #     text!(ax, 10^-3.5, 1e-6; text = L"k^{-3}")
 #     # Draw spectra lines for E_T, E_u, E_v, E_w
@@ -143,7 +145,7 @@ end
 #     lines!(ax, Su.freq, Real.(Su.spec./Sv0.spec[1]), color = :blue, label = L"E_u")
 #     lines!(ax, Sv.freq, Real.(Sv.spec./Sv0.spec[1]), color = :green, label = L"E_v")
 #     lines!(ax, Sw.freq, Real.(Sw.spec./Sv0.spec[1]), color = :black, label = L"E_w")
-#     xlims!(ax, (8e-5, 4e-2))
+#     xlims!(ax, (1e-5, 6e-2))
 
 #     # Vertical line corresponding to wavenumber at wavelength = 10^4 m = 10 km (refers to a 10km spatial scale)
 #     # Anything to the left is motions larger than 10km
@@ -221,26 +223,29 @@ end
 
 klev = 65       # corresponds to depth = -8.4375 m
 
-subdomain = 91
-St_d05 = spectrum_uvwT(22865, 0.5, subdomain, klev)
-St_d15 = spectrum_uvwT(42238, 1.5, subdomain, klev)
-St_d25 = spectrum_uvwT(62484, 2.5, subdomain, klev)
-St_d35 = spectrum_uvwT(82586, 3.5, subdomain, klev)
-St_d45 = spectrum_uvwT(103348, 4.5, subdomain, klev)
-St_d55 = spectrum_uvwT(123463, 5.5, subdomain, klev)
-St_d65 = spectrum_uvwT(143293, 6.5, subdomain, klev)
-St_d75 = spectrum_uvwT(164410, 7.5, subdomain, klev)
+subdomain = 97
+println("--- Subdomain $(i) ---")
+fileparam = "subdomain" * string(subdomain)
 
-# Plot figure
+St_d05, Su_d05, Sv_d05, Sw_d05 = spectrum_uvwT(22865, 0.5, subdomain, klev)
+St_d15, Su_d15, Sv_d15, Sw_d15 = spectrum_uvwT(42238, 1.5, subdomain, klev)
+St_d25, Su_d25, Sv_d25, Sw_d25 = spectrum_uvwT(62484, 2.5, subdomain, klev)
+St_d35, Su_d35, Sv_d35, Sw_d35 = spectrum_uvwT(82586, 3.5, subdomain, klev)
+St_d45, Su_d45, Sv_d45, Sw_d45 = spectrum_uvwT(103348, 4.5, subdomain, klev)
+St_d55, Su_d55, Sv_d55, Sw_d55 = spectrum_uvwT(123463, 5.5, subdomain, klev)
+St_d65, Su_d65, Sv_d65, Sw_d65 = spectrum_uvwT(143293, 6.5, subdomain, klev)
+St_d75, Su_d75, Sv_d75, Sw_d75 = spectrum_uvwT(164410, 7.5, subdomain, klev)
+
+# Plot figure (T)
 fig = Figure(size = (600, 500))
 
 # Define axes for figures
 # low k: oscillates over a long spatial distance, "large-scale motions"
 # high k: oscillates over a short spatial distance, "small-scale motions"
 axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
-                ylabel = L"E_u(k)/E_u (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
+                ylabel = L"E_T(k)/E_T (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
                 xscale = log10, yscale = log10,
-                limits = ((8e-5, 4e-2), (1e-9,1e1)))
+                limits = ((1e-6, 1e-2), (1e-9,1e1)))
 
 ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
 
@@ -282,59 +287,97 @@ vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
 
 axislegend(ax, labelsize=10, patchsize = (20, 5))
 
-save(filesave * "spectrau_" * fileparam * "_evol.pdf", fig)
+save(filesave * "spectraT_" * fileparam * "_evol.png", fig)
 println("Finished plotting spectra.")
 
-# for (i,klev) in enumerate([65,33,1])       # for hy, depths at level = [127,116,98]
-#     println("Plotting spectra at z = $(zT[klev])m...")
+# Plot figure (u)
+fig = Figure(size = (600, 500))
+axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
+                ylabel = L"E_u(k)/E_u (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
+                xscale = log10, yscale = log10,
+                limits = ((1e-6, 1e-2), (1e-6,1e4)))
+ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
 
-#     if i == 1
-#         # axis labels on leftmost subplot
-#         ax = Axis(fig[1, i]; title="z=$(zT[klev]) m", axis_kwargs1...)
-#     else
-#         # axis ticks but no axis labels on middle and rightmost subplots 
-#         ax = Axis(fig[1, i]; title="z=$(zT[klev]) m", axis_kwargs2...)
-#         hideydecorations!(ax, ticks = false)
-#     end
+global Su0 = Su_d05
 
-#     # Compute the auto-spectrum (co-spectrum of field with itself) of T, u, v, w 
-#     Su = isotropic_powerspectrum(interior(u, :, :, klev), interior(u, :, :, klev), xu, yu)
-#     Sv = isotropic_powerspectrum(interior(v, :, :, klev), interior(v, :, :, klev), xv, yv)
-#     wk = (interior(w, :, :, klev)+interior(w, :, :, klev+1))/2      # interpolates between neighboring cells to get depth of cell center
-#     Sw = isotropic_powerspectrum(wk, wk, xw, yw)
-#     St = isotropic_powerspectrum(interior(T, :, :, klev), interior(T, :, :, klev), xT, yT)
-    
-#     # Data types:
-#     # interior(u, :, :, klev): SubArray{Float32, 2, Array{Float32, 3}, Tuple{UnitRange{Int64}, UnitRange{Int64}, Int64}, false}
-#     # wk: Matrix{Float32}  
-#     # println(typeof(interior(u, :, :, klev)))
-#     # println(typeof(wk))
+lines!(ax, Su_d05.freq, 1e-9Su_d05.freq.^-2, linestyle = :dash, color = :black)
+text!(ax, 1e-3, 1e-1; text = L"k^{-2}")
+lines!(ax, Su_d05.freq, 1e-16Su_d05.freq.^-3, linestyle = :dash, color = :gray)
+text!(ax, 10^-3.5, 1e-5; text = L"k^{-3}")
+lines!(ax, Su_d05.freq, Real.(Su_d05.spec./Su0.spec[1]), color = colors[1], label = "Day 0.5")
+lines!(ax, Su_d15.freq, Real.(Su_d15.spec./Su0.spec[1]), color = colors[2], label = "Day 1.5")
+lines!(ax, Su_d25.freq, Real.(Su_d25.spec./Su0.spec[1]), color = colors[3], label = "Day 2.5")
+lines!(ax, Su_d35.freq, Real.(Su_d35.spec./Su0.spec[1]), color = colors[4], label = "Day 3.5")
+lines!(ax, Su_d45.freq, Real.(Su_d45.spec./Su0.spec[1]), color = colors[5], label = "Day 4.5")
+lines!(ax, Su_d55.freq, Real.(Su_d55.spec./Su0.spec[1]), color = colors[6], label = "Day 5.5")
+lines!(ax, Su_d65.freq, Real.(Su_d65.spec./Su0.spec[1]), color = colors[7], label = "Day 6.5")
+lines!(ax, Su_d75.freq, Real.(Su_d75.spec./Su0.spec[1]), color = colors[8], label = "Day 7.5")
 
-#     # Saves spectra at lowest k as the reference spectra for later normalization
-#     if i == 1
-#         global Sv0,St0 = Sv,St
-#     end
+xlims!(ax, (1e-6, 1e-2))
+vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
+axislegend(ax, labelsize=10, patchsize = (20, 5))
 
-#     # Draw reference k^(-2) and k^(-3) lines
-#     lines!(ax, Su.freq, 1e-8Su.freq.^-2, linestyle = :dash, color = :black)
-#     text!(ax, 1e-3, 1e-2; text = L"k^{-2}")
-#     lines!(ax, Su.freq, 1e-15Su.freq.^-3, linestyle = :dash, color = :gray)
-#     text!(ax, 10^-3.5, 1e-6; text = L"k^{-3}")
-#     # Draw spectra lines for E_T, E_u, E_v, E_w
-#     lines!(ax, St.freq, Real.(St.spec./St0.spec[1]), color = :red, label = L"E_T")
-#     lines!(ax, Su.freq, Real.(Su.spec./Sv0.spec[1]), color = :blue, label = L"E_u")
-#     lines!(ax, Sv.freq, Real.(Sv.spec./Sv0.spec[1]), color = :green, label = L"E_v")
-#     lines!(ax, Sw.freq, Real.(Sw.spec./Sv0.spec[1]), color = :black, label = L"E_w")
-#     xlims!(ax, (8e-5, 4e-2))
+save(filesave * "spectrau_" * fileparam * "_evol.png", fig)
+println("Finished plotting spectra.")
 
-#     # Vertical line corresponding to wavenumber at wavelength = 10^4 m = 10 km (refers to a 10km spatial scale)
-#     # Anything to the left is motions larger than 10km
-#     # Anything to the right is motions smaller than 10km 
-#     # 10km spatial scale is the loose boundary between submesoscale and mesoscale 
-#     vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
+# Plot figure (v)
+fig = Figure(size = (600, 500))
+axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
+                ylabel = L"E_v(k)/E_v (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
+                xscale = log10, yscale = log10,
+                limits = ((1e-6, 1e-2), (1e-6,1e4)))
+ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
 
-#     axislegend(ax, labelsize=10, patchsize = (20, 5))
-# end
+global Sv0 = Sv_d05
 
-# save(filesave * "spectra_" * fileparam * "_iter$(iteration).pdf", fig)
-# println("Finished plotting spectra, wall time: $((now() - t0).value/1e3) seconds.")
+lines!(ax, Su_d05.freq, 1e-9Su_d05.freq.^-2, linestyle = :dash, color = :black)
+text!(ax, 1e-3, 1e-1; text = L"k^{-2}")
+lines!(ax, Su_d05.freq, 1e-16Su_d05.freq.^-3, linestyle = :dash, color = :gray)
+text!(ax, 10^-3.5, 1e-5; text = L"k^{-3}")
+lines!(ax, Sv_d05.freq, Real.(Sv_d05.spec./Sv0.spec[1]), color = colors[1], label = "Day 0.5")
+lines!(ax, Sv_d15.freq, Real.(Sv_d15.spec./Sv0.spec[1]), color = colors[2], label = "Day 1.5")
+lines!(ax, Sv_d25.freq, Real.(Sv_d25.spec./Sv0.spec[1]), color = colors[3], label = "Day 2.5")
+lines!(ax, Sv_d35.freq, Real.(Sv_d35.spec./Sv0.spec[1]), color = colors[4], label = "Day 3.5")
+lines!(ax, Sv_d45.freq, Real.(Sv_d45.spec./Sv0.spec[1]), color = colors[5], label = "Day 4.5")
+lines!(ax, Sv_d55.freq, Real.(Sv_d55.spec./Sv0.spec[1]), color = colors[6], label = "Day 5.5")
+lines!(ax, Sv_d65.freq, Real.(Sv_d65.spec./Sv0.spec[1]), color = colors[7], label = "Day 6.5")
+lines!(ax, Sv_d75.freq, Real.(Sv_d75.spec./Sv0.spec[1]), color = colors[8], label = "Day 7.5")
+
+xlims!(ax, (1e-6, 1e-2))
+vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
+axislegend(ax, labelsize=10, patchsize = (20, 5))
+
+save(filesave * "spectrav_" * fileparam * "_evol.png", fig)
+println("Finished plotting spectra.")
+
+# Plot figure (w)
+fig = Figure(size = (600, 500))
+axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
+                ylabel = L"E_w(k)/E_w (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
+                xscale = log10, yscale = log10,
+                limits = ((1e-6, 1e-2), (1e-6,1e4)))
+ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
+
+global Sw0 = Sw_d05
+
+lines!(ax, Su_d05.freq, 1e-9Su_d05.freq.^-2, linestyle = :dash, color = :black)
+text!(ax, 1e-3, 1e-1; text = L"k^{-2}")
+lines!(ax, Su_d05.freq, 1e-16Su_d05.freq.^-3, linestyle = :dash, color = :gray)
+text!(ax, 10^-3.5, 1e-5; text = L"k^{-3}")
+lines!(ax, Sw_d05.freq, Real.(Sw_d05.spec./Sw0.spec[1]), color = colors[1], label = "Day 0.5")
+lines!(ax, Sw_d15.freq, Real.(Sw_d15.spec./Sw0.spec[1]), color = colors[2], label = "Day 1.5")
+lines!(ax, Sw_d25.freq, Real.(Sw_d25.spec./Sw0.spec[1]), color = colors[3], label = "Day 2.5")
+lines!(ax, Sw_d35.freq, Real.(Sw_d35.spec./Sw0.spec[1]), color = colors[4], label = "Day 3.5")
+lines!(ax, Sw_d45.freq, Real.(Sw_d45.spec./Sw0.spec[1]), color = colors[5], label = "Day 4.5")
+lines!(ax, Sw_d55.freq, Real.(Sw_d55.spec./Sw0.spec[1]), color = colors[6], label = "Day 5.5")
+lines!(ax, Sw_d65.freq, Real.(Sw_d65.spec./Sw0.spec[1]), color = colors[7], label = "Day 6.5")
+lines!(ax, Sw_d75.freq, Real.(Sw_d75.spec./Sw0.spec[1]), color = colors[8], label = "Day 7.5")
+
+xlims!(ax, (1e-6, 1e-2))
+vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
+axislegend(ax, labelsize=10, patchsize = (20, 5))
+
+save(filesave * "spectraw_" * fileparam * "_evol.png", fig)
+println("Finished plotting spectra.")
+
+### -------------------------------------------------------------------------
