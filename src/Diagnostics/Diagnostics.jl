@@ -114,5 +114,6 @@ include("pointwise_diagnostics.jl")
 include("spectra.jl")
 include("filtering.jl")
 include("load_distributed_snapshot.jl")
+include("inspect_checkpoint_domain.jl")
 
 end

@@ -284,8 +284,17 @@ function load_distributed_checkpoint_subdomain(filename, iteration;
                                                ylims = nothing,
                                                zlims = nothing,
                                                levels = nothing,
+                                               fields = (:u,:v,:w,:T),
                                                getEw = false,
                                                getMLD = 0, Δρ = 0.03)
+
+    # getMLD needs T (and optionally w) present
+    if getMLD >= 1 && !(:T in fields)
+        error("getMLD requires :T to be included in `fields`")
+    end
+    if getEw && !(:w in fields)
+        error("getEw requires :w to be included in `fields`")
+    end
 
     # Helper function to handle periodic coordinate normalization
     function normalize_periodic_coords(coord_min, coord_max, domain_size)
@@ -384,11 +393,12 @@ function load_distributed_checkpoint_subdomain(filename, iteration;
         data_z_range_w = levels
     end
 
-    # Create fields on subdomain grid
-    u =  XFaceField(grid; indices=field_indices)
-    v =  YFaceField(grid; indices=field_indices)
-    w =  ZFaceField(grid; indices=field_indices)
-    T = CenterField(grid; indices=field_indices)
+    # Create ONLY the requested fields
+    u = :u in fields ?  XFaceField(grid; indices=field_indices) : nothing
+    v = :v in fields ?  YFaceField(grid; indices=field_indices) : nothing
+    w = :w in fields ?  ZFaceField(grid; indices=field_indices) : nothing
+    T = :T in fields ? CenterField(grid; indices=field_indices) : nothing
+
     if getMLD >= 1
         MLD = Field{Center, Center, Nothing}(grid)
         if getEw
@@ -471,11 +481,12 @@ function load_distributed_checkpoint_subdomain(filename, iteration;
                     file_Ry = file["NonhydrostaticModel/grid"].architecture.local_index[2]
                     
                     # Load data from this rank (excluding halos)
-                    udata = file["NonhydrostaticModel/u/data"][Hx+1:end-Hx, Hy+1:end-Hy, Hz+1:end-Hz]
-                    vdata = file["NonhydrostaticModel/v/data"][Hx+1:end-Hx, Hy+1:end-Hy, Hz+1:end-Hz]
-                    wdata = file["NonhydrostaticModel/w/data"][Hx+1:end-Hx, Hy+1:end-Hy, Hz+1:end-Hz]
-                    Tdata = file["NonhydrostaticModel/T/data"][Hx+1:end-Hx, Hy+1:end-Hy, Hz+1:end-Hz]
-                    
+                    # Only read datasets for requested fields
+                    udata = :u in fields ? file["NonhydrostaticModel/u/data"][Hx+1:end-Hx, Hy+1:end-Hy, Hz+1:end-Hz] : nothing
+                    vdata = :v in fields ? file["NonhydrostaticModel/v/data"][Hx+1:end-Hx, Hy+1:end-Hy, Hz+1:end-Hz] : nothing
+                    wdata = :w in fields ? file["NonhydrostaticModel/w/data"][Hx+1:end-Hx, Hy+1:end-Hy, Hz+1:end-Hz] : nothing
+                    Tdata = :T in fields ? file["NonhydrostaticModel/T/data"][Hx+1:end-Hx, Hy+1:end-Hy, Hz+1:end-Hz] : nothing
+
                     close(file)
 
                     if getMLD >= 1
@@ -555,14 +566,22 @@ function load_distributed_checkpoint_subdomain(filename, iteration;
                     # Copy data with proper indexing
                     # if isnothing(levels)
                     # Full vertical range
-                    interior(u, final_x_start:final_x_end, final_y_start:final_y_end, :) .=
-                        udata[rank_x_start_local:rank_x_end_local, rank_y_start_local:rank_y_end_local, data_z_range]
-                    interior(v, final_x_start:final_x_end, final_y_start:final_y_end, :) .=
-                        vdata[rank_x_start_local:rank_x_end_local, rank_y_start_local:rank_y_end_local, data_z_range]
-                    interior(w, final_x_start:final_x_end, final_y_start:final_y_end, :) .=
-                        wdata[rank_x_start_local:rank_x_end_local, rank_y_start_local:rank_y_end_local, data_z_range_w]
-                    interior(T, final_x_start:final_x_end, final_y_start:final_y_end, :) .=
-                        Tdata[rank_x_start_local:rank_x_end_local, rank_y_start_local:rank_y_end_local, data_z_range]
+                    if :u in fields
+                        interior(u, final_x_start:final_x_end, final_y_start:final_y_end, :) .=
+                            udata[rank_x_start_local:rank_x_end_local, rank_y_start_local:rank_y_end_local, data_z_range]
+                    end
+                    if :v in fields
+                        interior(v, final_x_start:final_x_end, final_y_start:final_y_end, :) .=
+                            vdata[rank_x_start_local:rank_x_end_local, rank_y_start_local:rank_y_end_local, data_z_range]
+                    end
+                    if :w in fields
+                        interior(w, final_x_start:final_x_end, final_y_start:final_y_end, :) .=
+                            wdata[rank_x_start_local:rank_x_end_local, rank_y_start_local:rank_y_end_local, data_z_range_w]
+                    end
+                    if :T in fields
+                        interior(T, final_x_start:final_x_end, final_y_start:final_y_end, :) .=
+                            Tdata[rank_x_start_local:rank_x_end_local, rank_y_start_local:rank_y_end_local, data_z_range]
+                    end
                     if getMLD >= 1
                         interior(MLD, final_x_start:final_x_end, final_y_start:final_y_end, 1) .=
                             MLDdata[rank_x_start_local:rank_x_end_local, rank_y_start_local:rank_y_end_local, 1]
@@ -603,16 +622,24 @@ function load_distributed_checkpoint_subdomain(filename, iteration;
         end
     end
 
-    fill_halo_regions!(u)
-    fill_halo_regions!(v)
-    fill_halo_regions!(w)
-    fill_halo_regions!(T)
     snapshot = Dict()
-    snapshot[:u] = u
-    snapshot[:v] = v
-    snapshot[:w] = w
-    snapshot[:T] = T
     snapshot[:grid] = grid
+    if :u in fields
+        fill_halo_regions!(u)
+        snapshot[:u] = u
+    end
+    if :v in fields
+        fill_halo_regions!(v)
+        snapshot[:v] = v
+    end
+    if :w in fields
+        fill_halo_regions!(w)
+        snapshot[:w] = w
+    end
+    if :T in fields
+        fill_halo_regions!(T)
+        snapshot[:T] = T
+    end
     if getMLD >= 1
         fill_halo_regions!(MLD)
         snapshot[:MLD] = MLD
