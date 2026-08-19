@@ -44,9 +44,6 @@ const OUTPUT_DIR = CHECKPOINT_DIR * "subdomains_ASR/"
 
 # --- Checkpoint Selection ---
 const ITERATION = 164410
-# iteration11x, iteration 113103 is 5.0 days = 432000 seconds
-# iteration14x, iteration 143293 is 6.5 days = 561600 seconds
-# iteration16x, iteration 164410 is 7.5 days = 648000 seconds
 
 # --- Domain Tiling Parameters ---
 const DOMAIN_LX = 100e3           # Full domain x-extent (m)
@@ -56,7 +53,7 @@ const Z_LIMITS = (-81.0, 0.0)     # Vertical extent (m): 72 cells at dz=1.125m
 
 # --- Coarse-Graining Parameters ---
 const KERNEL = :gaussian          # Filter kernel: :gaussian, :tophat, or :lanczos
-const CUTOFF = 300.0              # Filter cutoff scale (m) used when saving tiles, ! ! ! changed to 0
+const CUTOFF = 0.0              # Filter cutoff scale (m) used when saving tiles, ! ! ! used to be 300.0
 const BORDER = :reflect           # Boundary handling: :reflect, :circular
 
 # Halo width = 2x cutoff for Gaussian (captures >95% of kernel weight)
