@@ -10,7 +10,7 @@ using JLD2 #, CUDA
 
 # --- Set file directories ---
 filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/" 
-filesave = "figures/20260708_nhy_frontanalysis/tiles/"
+filesave = "figures/20260819_regionABC_vis/"
 
 # --- Set parameters ---
 set_value!(; Δh = 4.8828125)    # horizontal spacing
@@ -407,43 +407,44 @@ end
 
 # 1. Define file parameters
 # Loop over subdomain files
-iteration = 62484
+iteration = 164410
 println("Iteration: $(iteration)")
 
 max_T = 0.0
 min_T = 1000.0
 
-for i in 1:100
-    println("--- Subdomain $(i) ---")
+# --- 10km x 10km Tiles ---
+# # for i in 1:100
+# #     println("--- Subdomain $(i) ---")
 
-    # 2. Define the filename of the saved snapshot
-    fileparam = "subdomain" * string(i)
-    output_filename = filehead * fileparam * "_iter$(iteration).jld2"
+# #     # 2. Define the filename of the saved snapshot
+# #     fileparam = "subdomain" * string(i)
+# #     output_filename = filehead * fileparam * "_iter$(iteration).jld2"
 
-    # 3. Load the snapshot
-    snapshot = load_subdomain_snapshot(output_filename)
+# #     # 3. Load the snapshot
+# #     snapshot = load_subdomain_snapshot(output_filename)
 
-    # update max and min T
-    curr_max = maximum(snapshot[:T])
-    curr_min = minimum(snapshot[:T])
-    global max_T = max(max_T, curr_max)
-    global min_T = min(min_T, curr_min)
-    println("Max T so far: $(max_T)")
-    println("Min T so far: $(min_T)")
+# #     # update max and min T
+# #     curr_max = maximum(snapshot[:T])
+# #     curr_min = minimum(snapshot[:T])
+# #     global max_T = max(max_T, curr_max)
+# #     global min_T = min(min_T, curr_min)
+# #     println("Max T so far: $(max_T)")
+# #     println("Min T so far: $(min_T)")
 
-    # 4. Plot figure
-    plot_T_image(snapshot, fileparam; Tmin=19.5, Tmax=20.1)
-    # plot_image(snapshot, :u, fileparam; k=70)
-    # plot_image(snapshot, :v, fileparam; k=70)
-    # plot_image(snapshot, :w, fileparam; k=70)
-    # plot_image(snapshot, :vort, fileparam; k=70)
-    # plot_image(snapshot, :vortf, fileparam; k=70)
-    # plot_image(snapshot, :hke, fileparam; k=70)
-    # plot_w(snapshot, fileparam)
-end
+# #     # 4. Plot figure
+# #     plot_T_image(snapshot, fileparam; Tmin=19.5, Tmax=20.1)
+# #     # plot_image(snapshot, :u, fileparam; k=70)
+# #     # plot_image(snapshot, :v, fileparam; k=70)
+# #     # plot_image(snapshot, :w, fileparam; k=70)
+# #     # plot_image(snapshot, :vort, fileparam; k=70)
+# #     # plot_image(snapshot, :vortf, fileparam; k=70)
+# #     # plot_image(snapshot, :hke, fileparam; k=70)
+# #     # plot_w(snapshot, fileparam)
+# # end
 
-println("FINAL Max T: $(max_T)")
-println("FINAL Min T: $(min_T)")
+# println("FINAL Max T: $(max_T)")
+# println("FINAL Min T: $(min_T)")
 
 # plot_T_colorbar(; Tmin=19.5, Tmax=20.1)
 # plot_colorbar(:u)
@@ -452,4 +453,44 @@ println("FINAL Min T: $(min_T)")
 # plot_colorbar(:vort)
 # plot_colorbar(:vortf)
 # plot_colorbar(:hke)
+
+
+# --- Regions A, B, C ---
+region = "B"
+println("--- Region $(region) ---")
+
+# 2. Define the filename of the saved snapshot
+fileparam = "region" * string(region)
+
+# 3. Load the snapshot and plot image - T
+output_filename = filehead * "subdomain_T_" * fileparam * "_iter$(iteration).jld2"
+snapshot = load_subdomain_snapshot(output_filename)
+plot_T_image(snapshot, fileparam; Tmin=19.5, Tmax=20.1)
+println("Freeing large variables...")
+snapshot = nothing      # free the variable
+GC.gc()                 # force the garbage collector to run immediately
+
+# 3. Load the snapshot and plot image - u
+output_filename = filehead * "subdomain_u_" * fileparam * "_iter$(iteration).jld2"
+snapshot = load_subdomain_snapshot(output_filename)
+plot_image(snapshot, :u, fileparam)
+println("Freeing large variables...")
+snapshot = nothing      # free the variable
+GC.gc()                 # force the garbage collector to run immediately
+
+# 3. Load the snapshot and plot image - v
+output_filename = filehead * "subdomain_v_" * fileparam * "_iter$(iteration).jld2"
+snapshot = load_subdomain_snapshot(output_filename)
+plot_image(snapshot, :v, fileparam)
+println("Freeing large variables...")
+snapshot = nothing      # free the variable
+GC.gc()                 # force the garbage collector to run immediately
+
+# 3. Load the snapshot and plot image - w
+output_filename = filehead * "subdomain_w_" * fileparam * "_iter$(iteration).jld2"
+snapshot = load_subdomain_snapshot(output_filename)
+plot_image(snapshot, :w, fileparam)
+println("Freeing large variables...")
+snapshot = nothing      # free the variable
+GC.gc()                 # force the garbage collector to run immediately
 
