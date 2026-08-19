@@ -64,7 +64,9 @@ Returns:
         - Δy: Grid spacing in the second dimension.
         - window_correction_factor: The factor applied to correct for window energy loss (1.0 if no window).
 """
-function isotropic_powerspectrum(var1::AbstractMatrix{T1}, var2::AbstractMatrix{T2}, Δx, Δy; T::DataType=Float32,
+function isotropic_powerspectrum(var1::AbstractMatrix{T1}, var2::AbstractMatrix{T2}; 
+                                 Δx::Real=parameters.Δh, Δy::Real=parameters.Δh,
+                                 T::DataType=Float32,
                                  L_filter::Union{Real, Nothing}=nothing, use_gpu::Bool=true,
                                  window::Union{Nothing, Symbol} = nothing) where {T1<:Real, T2<:Real}
 
@@ -81,10 +83,8 @@ function isotropic_powerspectrum(var1::AbstractMatrix{T1}, var2::AbstractMatrix{
     # --- Grid parameters ---
     Nx, Ny = size(var1)
     # Correctly calculate grid spacing assuming uniform grid
-    Δx = parameters.Δh
-    Δy = parameters.Δh
-    print(Δx)
-    print(Δy)
+    println("Grid spacing Δx: $(Δx)")
+    println("Grid spacing Δy: $(Δy)")
 
     # --- Preprocessing ---
     v1_mean = mean(var1)

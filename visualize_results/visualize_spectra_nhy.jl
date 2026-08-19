@@ -12,7 +12,28 @@ set_theme!(Theme(fontsize = 12))
 filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/" 
 filesave = "figures/20260718_nhy_spectra/"
 
-f = parameters.f 
+
+# --- Set parameters ---
+set_value!(; Δh = 4.8828125)    # horizontal spacing
+f = parameters.f;               # Coriolis parameter
+Q = 40                          # surface sensible heat flux? 
+h₀ = 60                         # height of the convective BL or mixing depth? 
+ρ₀ = parameters.ρ₀              # reference density
+cₚ = parameters.cp              # heat capacity
+α = parameters.α                # thermal expansion
+g = parameters.g                # gravity
+wₛ = (α * g * Q * h₀ / (ρ₀ * cₚ))^(1/3)     # convective velocity scale [m/s]?
+dx = 4.88281                    # [m] horizontal grid size
+dy = 4.88281                    # [m] horizontal grid size
+dz = 1.125                      # [m] vertical grid size
+
+# Double check grid spacing
+# xu, yu, zu = nodes(snapshots[:u])
+# Δx = xu[2] - xu[1]   # spacing between adjacent x-nodes
+# Δy = yu[2] - yu[1]
+# xT, yT, zT = nodes(snapshots[:T])   # or nodes(snapshots[:w]) for face-centered z
+# Δz = zT[2]-zT[1] # diff(zT)                       # vector of spacings between consecutive z-levels
+
 
 ## Computes the isotropic power spectrums of u, v, w, T
 function spectrum_uvwT(iteration, nday, subdomain, klev)
@@ -46,11 +67,11 @@ function spectrum_uvwT(iteration, nday, subdomain, klev)
     xT, yT, zT = nodes(T)       # T at cell centers 
 
     # Compute the auto-spectrum (co-spectrum of field with itself) of T, u, v, w 
-    Su = isotropic_powerspectrum(interior(u, :, :, klev), interior(u, :, :, klev), xu, yu)
-    Sv = isotropic_powerspectrum(interior(v, :, :, klev), interior(v, :, :, klev), xv, yv)
+    Su = isotropic_powerspectrum(interior(u, :, :, klev), interior(u, :, :, klev); Δx=dx, Δy=dy)
+    Sv = isotropic_powerspectrum(interior(v, :, :, klev), interior(v, :, :, klev); Δx=dx, Δy=dy)
     wk = (interior(w, :, :, klev)+interior(w, :, :, klev+1))/2      # interpolates between neighboring cells to get depth of cell center
-    Sw = isotropic_powerspectrum(wk, wk, xw, yw)
-    St = isotropic_powerspectrum(interior(T, :, :, klev), interior(T, :, :, klev), xT, yT)
+    Sw = isotropic_powerspectrum(wk, wk; Δx=dx, Δy=dy)
+    St = isotropic_powerspectrum(interior(T, :, :, klev), interior(T, :, :, klev); Δx=dx, Δy=dy)
 
     return St, Su, Sv, Sw
 end
@@ -189,8 +210,8 @@ end
 #     # divergence Rossby number: signals imbalance -> ageostrophy, internal gravity waves, or frontal circulations
 #     # convergent regions (delta<0) are where fronts sharpen, divergent regions (delta>0) are where fronts relax
 #     # also signifies strong vertical motion
-#     So = isotropic_powerspectrum(interior(ro, :, :, klev), interior(ro, :, :, klev), xT, yT)
-#     Sd = isotropic_powerspectrum(interior(rd, :, :, klev), interior(rd, :, :, klev), xT, yT)
+#     So = isotropic_powerspectrum(interior(ro, :, :, klev), interior(ro, :, :, klev); Δx=dx, Δy=dy)
+#     Sd = isotropic_powerspectrum(interior(rd, :, :, klev), interior(rd, :, :, klev); Δx=dx, Δy=dy)
     
 #     # Saves spectra at lowest k as the reference spectra for later normalization
 #     if i == 1
@@ -245,7 +266,7 @@ fig = Figure(size = (600, 500))
 axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
                 ylabel = L"E_T(k)/E_T (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
                 xscale = log10, yscale = log10,
-                limits = ((1e-6, 1e-2), (1e-9,1e1)))
+                limits = ((10^-3.5, 10^0.5), (1e-10,1e2)))
 
 ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
 
@@ -260,7 +281,7 @@ colors = [
     RGBf(0.800, 0.475, 0.655),   # reddish purple
 ]
 
-global St0 = St_d05
+global St0 = St_d75
 
 # Draw reference k^(-2) and k^(-3) lines
 lines!(ax, St_d05.freq, 1e-12St_d05.freq.^-2, linestyle = :dash, color = :black)
@@ -277,7 +298,7 @@ lines!(ax, St_d55.freq, Real.(St_d55.spec./St0.spec[1]), color = colors[6], labe
 lines!(ax, St_d65.freq, Real.(St_d65.spec./St0.spec[1]), color = colors[7], label = "Day 6.5")
 lines!(ax, St_d75.freq, Real.(St_d75.spec./St0.spec[1]), color = colors[8], label = "Day 7.5")
 
-xlims!(ax, (1e-6, 1e-2))
+xlims!(ax, (10^-3.5, 10^0.5))
 
 # Vertical line corresponding to wavenumber at wavelength = 10^4 m = 10 km (refers to a 10km spatial scale)
 # Anything to the left is motions larger than 10km
@@ -295,10 +316,10 @@ fig = Figure(size = (600, 500))
 axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
                 ylabel = L"E_u(k)/E_u (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
                 xscale = log10, yscale = log10,
-                limits = ((1e-6, 1e-2), (1e-6,1e4)))
+                limits = ((10^-3.5, 10^0.5), (1e-10,1e2)))
 ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
 
-global Su0 = Su_d05
+global Su0 = Su_d75
 
 lines!(ax, Su_d05.freq, 1e-9Su_d05.freq.^-2, linestyle = :dash, color = :black)
 text!(ax, 1e-3, 1e-1; text = L"k^{-2}")
@@ -313,7 +334,7 @@ lines!(ax, Su_d55.freq, Real.(Su_d55.spec./Su0.spec[1]), color = colors[6], labe
 lines!(ax, Su_d65.freq, Real.(Su_d65.spec./Su0.spec[1]), color = colors[7], label = "Day 6.5")
 lines!(ax, Su_d75.freq, Real.(Su_d75.spec./Su0.spec[1]), color = colors[8], label = "Day 7.5")
 
-xlims!(ax, (1e-6, 1e-2))
+xlims!(ax, (10^-3.5, 10^0.5))
 vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
 axislegend(ax, labelsize=10, patchsize = (20, 5))
 
@@ -325,10 +346,10 @@ fig = Figure(size = (600, 500))
 axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
                 ylabel = L"E_v(k)/E_v (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
                 xscale = log10, yscale = log10,
-                limits = ((1e-6, 1e-2), (1e-6,1e4)))
+                limits = ((10^-3.5, 10^0.5), (1e-10,1e2)))
 ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
 
-global Sv0 = Sv_d05
+global Sv0 = Sv_d75
 
 lines!(ax, Su_d05.freq, 1e-9Su_d05.freq.^-2, linestyle = :dash, color = :black)
 text!(ax, 1e-3, 1e-1; text = L"k^{-2}")
@@ -343,7 +364,7 @@ lines!(ax, Sv_d55.freq, Real.(Sv_d55.spec./Sv0.spec[1]), color = colors[6], labe
 lines!(ax, Sv_d65.freq, Real.(Sv_d65.spec./Sv0.spec[1]), color = colors[7], label = "Day 6.5")
 lines!(ax, Sv_d75.freq, Real.(Sv_d75.spec./Sv0.spec[1]), color = colors[8], label = "Day 7.5")
 
-xlims!(ax, (1e-6, 1e-2))
+xlims!(ax, (10^-3.5, 10^0.5))
 vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
 axislegend(ax, labelsize=10, patchsize = (20, 5))
 
@@ -355,10 +376,10 @@ fig = Figure(size = (600, 500))
 axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
                 ylabel = L"E_w(k)/E_w (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
                 xscale = log10, yscale = log10,
-                limits = ((1e-6, 1e-2), (1e-6,1e4)))
+                limits = ((10^-3.5, 10^0.5), (1e-10,1e2)))
 ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
 
-global Sw0 = Sw_d05
+global Sw0 = Sw_d75
 
 lines!(ax, Su_d05.freq, 1e-9Su_d05.freq.^-2, linestyle = :dash, color = :black)
 text!(ax, 1e-3, 1e-1; text = L"k^{-2}")
@@ -373,7 +394,7 @@ lines!(ax, Sw_d55.freq, Real.(Sw_d55.spec./Sw0.spec[1]), color = colors[6], labe
 lines!(ax, Sw_d65.freq, Real.(Sw_d65.spec./Sw0.spec[1]), color = colors[7], label = "Day 6.5")
 lines!(ax, Sw_d75.freq, Real.(Sw_d75.spec./Sw0.spec[1]), color = colors[8], label = "Day 7.5")
 
-xlims!(ax, (1e-6, 1e-2))
+xlims!(ax, (10^-3.5, 10^0.5))
 vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
 axislegend(ax, labelsize=10, patchsize = (20, 5))
 
