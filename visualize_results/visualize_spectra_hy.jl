@@ -74,13 +74,13 @@ function hyspectrum_uvwT(snapshots, snapshot_number, klev)
     xT, yT, zT = nodes(T)       # T at cell centers 
 
     # # Compute the auto-spectrum (co-spectrum of field with itself) of T, u, v, w 
+
+    # Full domain 
     # Su = isotropic_powerspectrum(interior(u, :, :, klev), interior(u, :, :, klev); Δx=dx, Δy=dy)
     # Sv = isotropic_powerspectrum(interior(v, :, :, klev), interior(v, :, :, klev); Δx=dx, Δy=dy)
     # wk = (interior(w, :, :, klev)+interior(w, :, :, klev+1))/2      # interpolates between neighboring cells to get depth of cell center
     # Sw = isotropic_powerspectrum(wk, wk; Δx=dx, Δy=dy)
     # St = isotropic_powerspectrum(interior(T, :, :, klev), interior(T, :, :, klev); Δx=dx, Δy=dy)
-
-    xrange = vcat(583:640, 1:7)
 
     # # Sliced to match nhy subdomain 91
     # Su = isotropic_powerspectrum(interior(u, 583:640, 7:71, klev), interior(u, 583:640, 7:71, klev); Δx=dx, Δy=dy)
@@ -89,7 +89,39 @@ function hyspectrum_uvwT(snapshots, snapshot_number, klev)
     # Sw = isotropic_powerspectrum(wk, wk; Δx=dx, Δy=dy)
     # St = isotropic_powerspectrum(interior(T, 583:640, 7:71, klev), interior(T, 583:640, 7:71, klev); Δx=dx, Δy=dy)
 
-    # Sliced to match nhy subdomain 97
+    # # Sliced to match nhy subdomain 97
+    # xrange = vcat(583:640, 1:7)
+    # Su = isotropic_powerspectrum(interior(u, xrange, 391:455, klev), interior(u, xrange, 391:455, klev); Δx=dx, Δy=dy)
+    # Sv = isotropic_powerspectrum(interior(v, xrange, 391:455, klev), interior(v, xrange, 391:455, klev); Δx=dx, Δy=dy)
+    # wk = (interior(w, xrange, 391:455, klev)+interior(w, xrange, 391:455, klev+1))/2
+    # Sw = isotropic_powerspectrum(wk, wk; Δx=dx, Δy=dy)
+    # St = isotropic_powerspectrum(interior(T, xrange, 391:455, klev), interior(T, xrange, 391:455, klev); Δx=dx, Δy=dy)
+
+    name = "C"
+
+    if name == "A"
+        xL, xR = 352, 608
+        yB, yT = 192, 448
+    elseif name == "B"
+        xL, xR = 512, 128
+        yB, yT = 480, 96
+    elseif name == "C"
+        xL, xR = 64, 320
+        yB, yT = 192, 448
+    end
+
+    if xL > xR
+        xrange = vcat(xL:640, 1:xR)
+    else
+        xrange = xL:xR
+    end
+
+    if yB > yT
+        yrange = vcat(yB:640, 1:yT)
+    else
+        yrange = yB:yT
+    end
+
     Su = isotropic_powerspectrum(interior(u, xrange, 391:455, klev), interior(u, xrange, 391:455, klev); Δx=dx, Δy=dy)
     Sv = isotropic_powerspectrum(interior(v, xrange, 391:455, klev), interior(v, xrange, 391:455, klev); Δx=dx, Δy=dy)
     wk = (interior(w, xrange, 391:455, klev)+interior(w, xrange, 391:455, klev+1))/2
@@ -221,8 +253,9 @@ end
 
 klev = 223       # corresponds to depth = -8.4375 m
 i = 97
-fileparam = "subdomain" * string(i)
+# fileparam = "subdomain" * string(i)
 # fileparam = "fulldomain"
+fileparam = "regionC"
 
 St_d05, Su_d05, Sv_d05, Sw_d05 = hyspectrum_uvwT(snapshots, 9, klev)
 St_d15, Su_d15, Sv_d15, Sw_d15 = hyspectrum_uvwT(snapshots, 25, klev)

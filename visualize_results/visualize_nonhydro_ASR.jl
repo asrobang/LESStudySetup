@@ -1,16 +1,20 @@
 using LESStudySetup
 using CairoMakie, Makie
+using FFTW
 using Printf, Dates, StatsBase
 using Statistics: mean, std, quantile
+using Oceananigans: compute!
+using Oceananigans.Grids: xnodes, ynodes, znodes
 using LESStudySetup.Diagnostics
 using LESStudySetup.Diagnostics: load_subdomain_snapshot
+using LESStudySetup.Diagnostics: load_snapshots, isotropic_powerspectrum, δ
 using MathTeXEngine
 set_theme!(theme_latexfonts(), fontsize=12, figure_padding = 10)
 using JLD2 #, CUDA
 
 # --- Set file directories ---
 filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/" 
-filesave = "figures/20260819_regionABC_vis/"
+filesave = "figures/20260824_pv/"
 
 # --- Set parameters ---
 set_value!(; Δh = 4.8828125)    # horizontal spacing
@@ -39,6 +43,132 @@ function vorticity2d(u,v,dx,dy)
     vort = dvdx .- dudy
 
     return vort
+end
+
+function compute_dAdx_dAdy(A,dx,dy) 
+    A_hpad = hcat(A, A[:, 1:1])      # pad the first column at the rightmost (Ny,Nx+1)
+    A_vpad = vcat(A, A[1:1, :])      # pad the first row at the bottom (Ny+1,Nx)
+    dAdx = (A_hpad[:, 2:end] .- A_hpad[:, 1:end-1]) ./ dx
+    dAdy = (A_vpad[2:end, :] .- A_vpad[1:end-1, :]) ./ dy
+    
+    return dAdx, dAdy
+end
+
+function compute_dAdz(A_above,A_below,dz)
+    dAdz = (A_above - A_below) ./ (2*dz)
+
+    return dAdz
+end
+
+function compute_bgradmag(T,T_above,T_below,α,g,dx,dy,dz)
+    dTdx, dTdy = compute_dAdx_dAdy(T,dx,dy) 
+    dTdz = compute_dAdz(T_above,T_below,dz)
+
+    bgradmag = (α*g) .* sqrt.(dTdx.^2 .+ dTdy.^2 .+ dTdz.^2)
+
+    return bgradmag
+end
+
+using FFTW
+using Oceananigans.Grids: xspacings, yspacings
+using Oceananigans.Fields: interior
+
+"""
+    filter(field, smooth)
+
+Apply a sharp spectral cutoff filter to `field`, removing all horizontal
+scales smaller than `smooth` (a physical length, e.g. in meters — NOT a
+number of grid cells).
+
+Cutoff wavenumber:
+    K = 2π / smooth
+
+This generalizes the "4Δx smoothing → K = π/(2Δx)" recipe: if smooth = 4Δx,
+then K = π/(2·(smooth/4)) = 2π/smooth, so K = 2π/smooth works for any
+smoothing scale.
+
+Assumes a horizontally uniform grid. Works on 2D (Nx, Ny) slices or
+3D (Nx, Ny, Nz) fields (filtered level-by-level in the horizontal).
+"""
+function filter(field, k, smooth)
+    grid = field.grid
+    Δx = minimum(xspacings(grid, Center()))
+    Δy = minimum(yspacings(grid, Center()))
+
+    data = Array(interior(field,:,:,k))  # bring to CPU physical-space array
+    Nx, Ny = size(data, 1), size(data, 2)
+
+    # Angular wavenumbers associated with the horizontal FFT
+    kx = 2π .* fftfreq(Nx, 1/dx)
+    ky = 2π .* fftfreq(Ny, 1/dy)
+
+    K = 2π / smooth          # cutoff wavenumber for this smoothing scale
+    κ² = (kx .^ 2) .+ (ky' .^ 2)
+    mask = κ² .<= K^2        # true where κ ≤ K (keep), false where κ > K (zero)
+
+    filtered = similar(data)
+
+    f̂ = fft(data)
+    f̂ .*= mask
+    filtered .= real.(ifft(f̂))
+
+    return filtered
+end
+
+using FFTW
+
+"""
+    bandpass_filter(field, dx, dy, cutoffs)
+
+Split `field` into multiple horizontal bands using a series of sharp
+spectral cutoffs (κ = √(k² + l²), periodic FFT in x, y).
+
+`cutoffs` should be given as physical smoothing scales (same units as
+dx, dy), sorted from largest scale to smallest, e.g.:
+
+    cutoffs = [1e4, 1e3, 1e2, 1e1, 1e0]
+
+which corresponds to wavenumber cutoffs K = 2π / cutoffs, i.e.
+K = [2π/10⁴, 2π/10³, 2π/10², 2π/10¹, 2π/10⁰].
+
+Returns a Dict mapping each band (as a string label) to the filtered field
+containing only that band's wavenumbers. Bands are:
+
+    band 1: κ ≤ K[1]                     (largest scales, > cutoffs[1])
+    band 2: K[1] < κ ≤ K[2]
+    band 3: K[2] < κ ≤ K[3]
+    ...
+    band N+1: κ > K[N]                   (smallest scales, < cutoffs[end])
+"""
+function bandpass_filter(field, dx, dy, cutoffs)
+    Nx, Ny = size(field, 1), size(field, 2)
+
+    kx = 2π .* fftfreq(Nx, 1/dx)
+    ky = 2π .* fftfreq(Ny, 1/dy)
+    κ² = (kx .^ 2) .+ (ky' .^ 2)
+
+    # cutoff wavenumbers, sorted increasing (since cutoffs is sorted decreasing)
+    K = 2π ./ cutoffs
+    @assert issorted(K) "cutoffs must be sorted from largest scale to smallest (e.g. [1e4, 1e3, ..., 1e0])"
+
+    f̂ = fft(field)
+    results = Dict{String, Array{Float64}}()
+
+    # band 1: everything below the first (smallest) cutoff wavenumber
+    mask = κ² .<= K[1]^2
+    results["κ ≤ 2π/$(cutoffs[1])"] = real.(ifft(f̂ .* mask))
+
+    # middle bands: between consecutive cutoffs
+    for n in 1:length(K)-1
+        mask = (κ² .> K[n]^2) .& (κ² .<= K[n+1]^2)
+        results["2π/$(cutoffs[n]) < κ ≤ 2π/$(cutoffs[n+1])"] = real.(ifft(f̂ .* mask))
+    end
+
+    # last band: everything above the largest cutoff wavenumber
+    mask = κ² .> K[end]^2
+    results["κ > 2π/$(cutoffs[end])"] = real.(ifft(f̂ .* mask))
+
+    return results
 end
 
 # ## Compute stratification (N^2) from vertical gradient of buoyancy 
@@ -263,6 +393,17 @@ function plot_image(snapshot, var, fileparam; Tmin=19, Tmax=21, k=70, colormap=:
 
     save(filesave * varlabel * "_" * fileparam * "_iter$(iteration).png", fig; px_per_unit = 4)
     println("Finished plotting " * varlabel * " heatmap")
+
+    # quick plot 
+    x, y, _ = nodes(snapshot[:T])
+    fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect())
+    varlabel = "q (potential vorticity)"
+    colormap = :balance
+    hm = heatmap!(ax, 1e-3x, 1e-3y, q_f;
+                rasterize = true, colormap = colormap)
+    Colorbar(fig[1, 2], hm)             # if you want colorbar
+    save(filesave * "q_f.png", fig; px_per_unit=4)
 end
 
 ## Plots the colorbar for a heatmap of temperature for a subdomain tile
@@ -380,6 +521,97 @@ function plot_vimage(snapshot, var, fileparam; Tmin=19, Tmax=21, colormap=:therm
     println("Finished plotting w fields")
 end
 
+function plot_filteredPV(snapshot)
+    # filtered
+    T_f = filter(snapshot[:T], 70, 4*dx)                    # 2048×2048 Matrix{Float32}
+    u_f = filter(snapshot[:u], 70, 4*dx)[1:end-1, :]        # initially 2049×2048 Matrix{Float32}
+    v_f = filter(snapshot[:v], 70, 4*dx)[:, 1:end-1]        # initially 2048×2049 Matrix{Float32}
+    w_f = filter(snapshot[:w], 70, 4*dx)                    # 2048×2048 Matrix{Float32}
+    T_f_above = filter(snapshot[:T], 71, 4*dx)
+    u_f_above = filter(snapshot[:u], 71, 4*dx)[1:end-1, :]
+    v_f_above = filter(snapshot[:v], 71, 4*dx)[:, 1:end-1]
+    w_f_above = filter(snapshot[:w], 71, 4*dx)
+    T_f_below = filter(snapshot[:T], 69, 4*dx)
+    u_f_below = filter(snapshot[:u], 69, 4*dx)[1:end-1, :]
+    v_f_below = filter(snapshot[:v], 69, 4*dx)[:, 1:end-1]
+    w_f_below = filter(snapshot[:w], 69, 4*dx)
+
+    dTdx, dTdy = compute_dAdx_dAdy(T_f,dx,dy) 
+    dudx, dudy = compute_dAdx_dAdy(u_f,dx,dy) 
+    dvdx, dvdy = compute_dAdx_dAdy(v_f,dx,dy) 
+    dwdx, dwdy = compute_dAdx_dAdy(w_f,dx,dy) 
+    dTdz = compute_dAdz(T_f_above,T_f_below,dz)
+    dudz = compute_dAdz(u_f_above,u_f_below,dz)
+    dvdz = compute_dAdz(v_f_above,v_f_below,dz)
+
+    q_f = (α*g) .* ( dTdx .* (dwdy.-dvdz) .+ dTdy .* (dudz.-dwdx) .+ dTdz .* (dvdx.-dudy.+f) ) 
+
+    # quick plot 
+    x, y, _ = nodes(snapshot[:T])
+    fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect())
+    colormap = :balance
+    hm = heatmap!(ax, 1e-3x, 1e-3y, q_f;
+                rasterize = true, colormap = colormap, colorrange = (-4e-6, 4e-6))
+    Colorbar(fig[1, 2], hm)             # if you want colorbar
+    save(filesave * "q_f.png", fig; px_per_unit=4)
+
+    # unfiltered! 
+    T_uf = copy(interior(snapshot[:T],:,:,70))                    # 2048×2048 Matrix{Float32}
+    u_uf = copy(interior(snapshot[:u],:,:,70)[1:end-1, :])        # initially 2049×2048 Matrix{Float32}
+    v_uf = copy(interior(snapshot[:v],:,:,70)[:, 1:end-1])        # initially 2048×2049 Matrix{Float32}
+    w_uf = copy(interior(snapshot[:w],:,:,70))                    # 2048×2048 Matrix{Float32}
+    T_above = copy(interior(snapshot[:T],:,:,71))
+    u_above = copy(interior(snapshot[:u],:,:,71)[1:end-1, :])
+    v_above = copy(interior(snapshot[:v],:,:,71)[:, 1:end-1])
+    w_above = copy(interior(snapshot[:w],:,:,71))
+    T_below = copy(interior(snapshot[:T],:,:,69))
+    u_below = copy(interior(snapshot[:u],:,:,69)[1:end-1, :])
+    v_below = copy(interior(snapshot[:v],:,:,69)[:, 1:end-1])
+    w_below = copy(interior(snapshot[:w],:,:,69))
+
+    dTdx, dTdy = compute_dAdx_dAdy(T_uf,dx,dy) 
+    dudx, dudy = compute_dAdx_dAdy(u_uf,dx,dy) 
+    dvdx, dvdy = compute_dAdx_dAdy(v_uf,dx,dy) 
+    dwdx, dwdy = compute_dAdx_dAdy(w_uf,dx,dy) 
+    dTdz = compute_dAdz(T_above,T_below,dz)
+    dudz = compute_dAdz(u_above,u_below,dz)
+    dvdz = compute_dAdz(v_above,v_below,dz)
+
+    q_uf = (α*g) .* ( dTdx .* (dwdy.-dvdz) .+ dTdy .* (dudz.-dwdx) .+ dTdz .* (dvdx.-dudy.+f) ) 
+
+    # quick plot 
+    x, y, _ = nodes(snapshot[:T])
+    fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect())
+    colormap = :balance
+    hm = heatmap!(ax, 1e-3x, 1e-3y, q_uf;
+                rasterize = true, colormap = colormap, colorrange = (-4e-6, 4e-6))
+    Colorbar(fig[1, 2], hm)             # if you want colorbar
+    save(filesave * "q_uf.png", fig; px_per_unit=4)
+
+    # filtered vs. unfiltered T 
+    # quick plot 
+    x, y, _ = nodes(snapshot[:T])
+    fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect())
+    colormap = :balance
+    hm = heatmap!(ax, 1e-3x, 1e-3y, T_f;
+                rasterize = true, colormap = colormap, colorrange = (19.5, 20.1))
+    Colorbar(fig[1, 2], hm)             # if you want colorbar
+    save(filesave * "T_f.png", fig; px_per_unit=4)
+
+    # quick plot 
+    x, y, _ = nodes(snapshot[:T])
+    fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect())
+    colormap = :balance
+    hm = heatmap!(ax, 1e-3x, 1e-3y, T_uf;
+                rasterize = true, colormap = colormap, colorrange = (19.5, 20.1))
+    Colorbar(fig[1, 2], hm)             # if you want colorbar
+    save(filesave * "T_uf.png", fig; px_per_unit=4)
+end
+
 ### -------------------------------------------------------------------------
 
 # ### Loop through multiple files and plot w, Twuv using Shirui's functions 
@@ -410,38 +642,131 @@ end
 iteration = 164410
 println("Iteration: $(iteration)")
 
-max_T = 0.0
-min_T = 1000.0
+# max_T = 0.0
+# min_T = 1000.0
 
 # --- 10km x 10km Tiles ---
-# # for i in 1:100
-# #     println("--- Subdomain $(i) ---")
+i = 97  # temporarily commented out for loop 
+# for i in 97:97 #1:100
+    println("--- Subdomain $(i) ---")
 
-# #     # 2. Define the filename of the saved snapshot
-# #     fileparam = "subdomain" * string(i)
-# #     output_filename = filehead * fileparam * "_iter$(iteration).jld2"
+    # 2. Define the filename of the saved snapshot
+    fileparam = "subdomain" * string(i)
+    output_filename = filehead * fileparam * "_iter$(iteration).jld2"
 
-# #     # 3. Load the snapshot
-# #     snapshot = load_subdomain_snapshot(output_filename)
+    # 3. Load the snapshot
+    snapshot = load_subdomain_snapshot(output_filename)
 
-# #     # update max and min T
-# #     curr_max = maximum(snapshot[:T])
-# #     curr_min = minimum(snapshot[:T])
-# #     global max_T = max(max_T, curr_max)
-# #     global min_T = min(min_T, curr_min)
-# #     println("Max T so far: $(max_T)")
-# #     println("Min T so far: $(min_T)")
+    # ---
 
-# #     # 4. Plot figure
-# #     plot_T_image(snapshot, fileparam; Tmin=19.5, Tmax=20.1)
-# #     # plot_image(snapshot, :u, fileparam; k=70)
-# #     # plot_image(snapshot, :v, fileparam; k=70)
-# #     # plot_image(snapshot, :w, fileparam; k=70)
-# #     # plot_image(snapshot, :vort, fileparam; k=70)
-# #     # plot_image(snapshot, :vortf, fileparam; k=70)
-# #     # plot_image(snapshot, :hke, fileparam; k=70)
-# #     # plot_w(snapshot, fileparam)
-# # end
+    T_uf = copy(interior(snapshot[:T],:,:,70))
+    T_above = copy(interior(snapshot[:T],:,:,71))
+    T_below = copy(interior(snapshot[:T],:,:,69))
+
+    field = compute_bgradmag(T_uf,T_above,T_below,α,g,dx,dy,dz)
+
+    # quick plot of field
+    x, y, _ = nodes(snapshot[:T])
+    fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect())
+    colormap = :binary
+    hm = heatmap!(ax, 1e-3x, 1e-3y, field;
+                rasterize = true, colormap = colormap, colorscale=log10)
+    Colorbar(fig[1, 2], hm)             # if you want colorbar
+    save(filesave * "bgradmag_uf.png", fig; px_per_unit=4)
+
+    # quick plot of spectra 
+    S_bgradmag = isotropic_powerspectrum(field, field; Δx=dx, Δy=dy)
+    fig = Figure(size = (600, 500))
+    axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
+                ylabel = L"E_T(k)/E_T (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
+                xscale = log10, yscale = log10,
+                limits = ((10^-4.5, 10^0.5), (1e-17,1e3)))
+    ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
+    global St0 = S_bgradmag
+    lines!(ax, S_bgradmag.freq, Real.(S_bgradmag.spec./St0.spec[1]))
+    xlims!(ax, (10^-4.5, 10^0.5))
+    vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
+    save(filesave * "spectra_bgradmag_uf.png", fig)
+
+    # grid = field.grid
+    # Δx = minimum(xspacings(grid, Center()))
+    # Δy = minimum(yspacings(grid, Center()))
+
+    # data = Array(interior(field,:,:,k))  # bring to CPU physical-space array
+    # Nx, Ny = size(data, 1), size(data, 2)
+
+    Nx, Ny = size(field, 1), size(field, 2)
+
+    # Angular wavenumbers associated with the horizontal FFT
+    kx = 2π .* fftfreq(Nx, 1/dx)
+    ky = 2π .* fftfreq(Ny, 1/dy)
+
+    # K = 2π / smooth          # cutoff wavenumber for this smoothing scale
+    # κ² = (kx .^ 2) .+ (ky' .^ 2)
+    # mask = κ² .<= K^2        # true where κ ≤ K (keep), false where κ > K (zero)
+
+    # filtered = similar(data)
+
+    # f̂ = fft(data)
+    # f̂ .*= mask
+    # filtered .= real.(ifft(f̂))
+
+    cutoffs = [1e4, 1e3, 1e2, 1e1, 1e0]
+    bands = bandpass_filter(field, dx, dy, cutoffs)
+
+    # access a specific band
+    bands["κ ≤ 2π/10000.0"]
+    bands["2π/10000.0 < κ ≤ 2π/1000.0"]
+    bands["2π/1000.0 < κ ≤ 2π/100.0"]
+    bands["2π/100.0 < κ ≤ 2π/10.0"]
+    bands["2π/10.0 < κ ≤ 2π/1.0"]
+
+    labels = collect(keys(bands))
+    n = length(labels)
+    ncols_ = 3
+    nrows_ = ceil(Int, n / ncols_)
+
+    fig = Figure(size = (400*ncols_, 350*nrows_))
+    for (idx, label) in enumerate(labels)
+        row = div(idx - 1, ncols_) + 1
+        col = mod(idx - 1, ncols_) + 1
+
+        ax = Axis(fig[row, col], title = label, aspect = DataAspect())
+        data = bands[label]
+
+        m = maximum(abs, data)  # symmetric bound around 0
+        m = m == 0 ? 1e-10 : m   # avoid zero-width colorrange
+        hm = heatmap!(ax, 1e-3x, 1e-3y, data, colormap = :balance, colorrange = (-m, m))
+        Colorbar(fig[row, col+ncols_], hm, width = 10)
+    end
+    save(filesave * "bands_bgradmag_uf.png", fig)
+
+    # julia> extrema(bands["κ ≤ 2π/10000.0"])
+    # (3.728470647715559e-6, 3.728470647715559e-6)
+
+    # ---
+
+    # # update max and min T
+    # curr_max = maximum(snapshot[:T])
+    # curr_min = minimum(snapshot[:T])
+    # global max_T = max(max_T, curr_max)
+    # global min_T = min(min_T, curr_min)
+    # println("Max T so far: $(max_T)")
+    # println("Min T so far: $(min_T)")
+
+    # 4. Plot figure
+    # plot_T_image(snapshot, fileparam; Tmin=19.5, Tmax=20.1)
+    # plot_image(snapshot, :u, fileparam; k=70)
+    # plot_image(snapshot, :v, fileparam; k=70)
+    # plot_image(snapshot, :w, fileparam; k=70)
+    # plot_image(snapshot, :vort, fileparam; k=70)
+    # plot_image(snapshot, :vortf, fileparam; k=70)
+    # plot_image(snapshot, :hke, fileparam; k=70)
+    # plot_image(snapshot, :pv, fileparam; k=70)
+    # plot_w(snapshot, fileparam)
+    # plot_filteredPV(snapshot)     # needs to be cleaned up 
+# end
 
 # println("FINAL Max T: $(max_T)")
 # println("FINAL Min T: $(min_T)")
@@ -453,44 +778,48 @@ min_T = 1000.0
 # plot_colorbar(:vort)
 # plot_colorbar(:vortf)
 # plot_colorbar(:hke)
+# plot_colorbar(:pv)
 
+# ### -------------------------------------------------------------------------
+# ## Plot the heatmap plots of one of regions A, B, and C
 
-# --- Regions A, B, C ---
-region = "B"
-println("--- Region $(region) ---")
+# # --- Regions A, B, C ---
+# region = "B"
+# println("--- Region $(region) ---")
 
-# 2. Define the filename of the saved snapshot
-fileparam = "region" * string(region)
+# # 2. Define the filename of the saved snapshot
+# fileparam = "region" * string(region)
 
-# 3. Load the snapshot and plot image - T
-output_filename = filehead * "subdomain_T_" * fileparam * "_iter$(iteration).jld2"
-snapshot = load_subdomain_snapshot(output_filename)
-plot_T_image(snapshot, fileparam; Tmin=19.5, Tmax=20.1)
-println("Freeing large variables...")
-snapshot = nothing      # free the variable
-GC.gc()                 # force the garbage collector to run immediately
+# # 3. Load the snapshot and plot image - T
+# output_filename = filehead * "subdomain_T_" * fileparam * "_iter$(iteration).jld2"
+# snapshot = load_subdomain_snapshot(output_filename)
+# plot_T_image(snapshot, fileparam; Tmin=19.5, Tmax=20.1)
+# println("Freeing large variables...")
+# snapshot = nothing      # free the variable
+# GC.gc()                 # force the garbage collector to run immediately
 
-# 3. Load the snapshot and plot image - u
-output_filename = filehead * "subdomain_u_" * fileparam * "_iter$(iteration).jld2"
-snapshot = load_subdomain_snapshot(output_filename)
-plot_image(snapshot, :u, fileparam)
-println("Freeing large variables...")
-snapshot = nothing      # free the variable
-GC.gc()                 # force the garbage collector to run immediately
+# # 3. Load the snapshot and plot image - u
+# output_filename = filehead * "subdomain_u_" * fileparam * "_iter$(iteration).jld2"
+# snapshot = load_subdomain_snapshot(output_filename)
+# plot_image(snapshot, :u, fileparam)
+# println("Freeing large variables...")
+# snapshot = nothing      # free the variable
+# GC.gc()                 # force the garbage collector to run immediately
 
-# 3. Load the snapshot and plot image - v
-output_filename = filehead * "subdomain_v_" * fileparam * "_iter$(iteration).jld2"
-snapshot = load_subdomain_snapshot(output_filename)
-plot_image(snapshot, :v, fileparam)
-println("Freeing large variables...")
-snapshot = nothing      # free the variable
-GC.gc()                 # force the garbage collector to run immediately
+# # 3. Load the snapshot and plot image - v
+# output_filename = filehead * "subdomain_v_" * fileparam * "_iter$(iteration).jld2"
+# snapshot = load_subdomain_snapshot(output_filename)
+# plot_image(snapshot, :v, fileparam)
+# println("Freeing large variables...")
+# snapshot = nothing      # free the variable
+# GC.gc()                 # force the garbage collector to run immediately
 
-# 3. Load the snapshot and plot image - w
-output_filename = filehead * "subdomain_w_" * fileparam * "_iter$(iteration).jld2"
-snapshot = load_subdomain_snapshot(output_filename)
-plot_image(snapshot, :w, fileparam)
-println("Freeing large variables...")
-snapshot = nothing      # free the variable
-GC.gc()                 # force the garbage collector to run immediately
+# # 3. Load the snapshot and plot image - w
+# output_filename = filehead * "subdomain_w_" * fileparam * "_iter$(iteration).jld2"
+# snapshot = load_subdomain_snapshot(output_filename)
+# plot_image(snapshot, :w, fileparam)
+# println("Freeing large variables...")
+# snapshot = nothing      # free the variable
+# GC.gc()                 # force the garbage collector to run immediately
 
+### -------------------------------------------------------------------------

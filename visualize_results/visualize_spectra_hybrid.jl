@@ -276,27 +276,6 @@ end
 # =============================================================================
 # --- Top-level dispatcher ---
 # =============================================================================
-# function spectra_uvwT(sim::String)
-#     hy_data, nhy_data = nothing, nothing
-
-#     if sim == "hy"
-#         println("------ Computing spectra from hydrostatic simulation ------")
-#         hy_data = compute_spectra_evol("hy")
-#     elseif sim == "nhy"
-#         println("------ Computing spectra from nonhydrostatic simulation ------")
-#         nhy_data = compute_spectra_evol("nhy")
-#     elseif sim == "both"
-#         println("------ Computing spectra from both simulations ------")
-#         hy_data  = compute_spectra_evol("hy")
-#         nhy_data = compute_spectra_evol("nhy")
-#     else
-#         error("Unknown sim type: $sim. Expected \"hy\", \"nhy\", or \"both\".")
-#     end
-
-#     for (field, varname) in [(:St, "T"), (:Su, "u"), (:Sv, "v"), (:Sw, "w")]
-#         plot_spectra_evol(sim, field, varname; hy_data, nhy_data)
-#     end
-# end
 
 function spectra_uvwT(sim::String)
     hy_data, nhy_data = nothing, nothing
@@ -327,4 +306,4 @@ end
 # =============================================================================
 # spectra_uvwT("both")   # or "hy" / "nhy" individually
 spectra_uvwT("nhy")
-spectra_uvwT("hy")
+# spectra_uvwT("hy")
