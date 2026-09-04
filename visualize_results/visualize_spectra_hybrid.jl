@@ -17,7 +17,7 @@ hy_metadata  = hy_filehead * "experiment_hydrostatic_twin_simulation_metadata.jl
 
 nhy_filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/"
 
-filesave = "figures/20260811_spectra/"
+filesave = "/home/asrobang/orcd/scratch/figures/20260811_spectra/"
 
 # =============================================================================
 # --- Shared physical parameters ---

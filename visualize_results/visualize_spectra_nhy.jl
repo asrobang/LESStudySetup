@@ -11,7 +11,7 @@ set_theme!(Theme(fontsize = 12))
 
 # --- Set file directories ---
 filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/" 
-filesave = "figures/20260819_regionABC_vis/"
+filesave = "/home/asrobang/orcd/scratch/figures/20260819_regionABC_vis/"
 
 
 # --- Set parameters ---

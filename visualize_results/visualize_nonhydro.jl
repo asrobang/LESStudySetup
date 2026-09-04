@@ -12,7 +12,7 @@ set_theme!(theme_latexfonts(), fontsize=12, figure_padding = 10)
 using JLD2 #, CUDA
 set_value!(; Δh = 4.8828125)
 filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/" 
-filesave = "figures/nonhydro/"
+filesave = "/home/asrobang/orcd/scratch/figures/nonhydro/"
 f = parameters.f;
 Q, h₀, ρ₀, cₚ, α, g = 40, 60, parameters.ρ₀, parameters.cp, parameters.α, parameters.g
 wₛ = (α * g * Q * h₀ / (ρ₀ * cₚ))^(1/3)

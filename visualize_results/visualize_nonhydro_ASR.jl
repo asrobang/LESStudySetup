@@ -4,7 +4,8 @@ using FFTW
 using Printf, Dates, StatsBase
 using Statistics: mean, std, quantile
 using Oceananigans: compute!
-using Oceananigans.Grids: xnodes, ynodes, znodes
+using Oceananigans.Grids: xnodes, ynodes, znodes, xspacings, yspacings
+using Oceananigans.Fields: interior
 using LESStudySetup.Diagnostics
 using LESStudySetup.Diagnostics: load_subdomain_snapshot
 using LESStudySetup.Diagnostics: load_snapshots, isotropic_powerspectrum, δ
@@ -14,7 +15,7 @@ using JLD2 #, CUDA
 
 # --- Set file directories ---
 filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/" 
-filesave = "figures/20260824_pv/"
+filesave = "/home/asrobang/orcd/scratch/figures/20260824_pv/"
 
 # --- Set parameters ---
 set_value!(; Δh = 4.8828125)    # horizontal spacing
@@ -68,10 +69,6 @@ function compute_bgradmag(T,T_above,T_below,α,g,dx,dy,dz)
 
     return bgradmag
 end
-
-using FFTW
-using Oceananigans.Grids: xspacings, yspacings
-using Oceananigans.Fields: interior
 
 """
     filter(field, smooth)
@@ -740,7 +737,7 @@ i = 97  # temporarily commented out for loop
         hm = heatmap!(ax, 1e-3x, 1e-3y, data, colormap = :balance, colorrange = (-m, m))
         Colorbar(fig[row, col+ncols_], hm, width = 10)
     end
-    save(filesave * "bands_bgradmag_uf.png", fig)
+    # save(filesave * "bands_bgradmag_uf.png", fig)
 
     # julia> extrema(bands["κ ≤ 2π/10000.0"])
     # (3.728470647715559e-6, 3.728470647715559e-6)

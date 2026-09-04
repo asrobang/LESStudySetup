@@ -34,7 +34,7 @@ end
 filehead = "./LESStudySetup/"
 filename = filehead * "hydrostatic_snapshots_" * fileparams * ".jld2"
 metadata = filehead * "experiment_" * fileparams * "_metadata.jld2"
-filesave = "./figures/"
+filesave = "/home/asrobang/orcd/scratch/figures/"
 
 # load all the data!!
 println("Loading data from $filename...")

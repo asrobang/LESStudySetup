@@ -26,7 +26,7 @@ end
 filehead = "./LESStudySetup/"
 filename = filehead * "hydrostatic_snapshots_" * fileparams * ".jld2"
 metadata = filehead * "experiment_" * fileparams * "_metadata.jld2"
-filesave = "./figures/20260717_hy_spectra/"
+filesave = "/home/asrobang/orcd/scratch/figures/20260717_hy_spectra/"
 
 # --- Set parameters ---
 set_value!(; Δh = 156.25)    # horizontal spacing
