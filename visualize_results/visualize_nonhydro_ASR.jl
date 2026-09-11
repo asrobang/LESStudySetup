@@ -15,7 +15,7 @@ using JLD2 #, CUDA
 
 # --- Set file directories ---
 filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/" 
-filesave = "/home/asrobang/orcd/scratch/figures/20260824_pv/"
+filesave = "/home/asrobang/orcd/scratch/figures/20260908_banded_bgradmag/"
 
 # --- Set parameters ---
 set_value!(; Δh = 4.8828125)    # horizontal spacing
@@ -61,11 +61,11 @@ function compute_dAdz(A_above,A_below,dz)
     return dAdz
 end
 
-function compute_bgradmag(T,T_above,T_below,α,g,dx,dy,dz)
+# |\nabla b_h|: the buoyancy gradient magnitude typically only includes the horizontal buoyancy gradient
+function compute_bgradmag(T,α,g,dx,dy)
     dTdx, dTdy = compute_dAdx_dAdy(T,dx,dy) 
-    dTdz = compute_dAdz(T_above,T_below,dz)
 
-    bgradmag = (α*g) .* sqrt.(dTdx.^2 .+ dTdy.^2 .+ dTdz.^2)
+    bgradmag = (α*g) .* sqrt.(dTdx.^2 .+ dTdy.^2)
 
     return bgradmag
 end
@@ -660,23 +660,27 @@ i = 97  # temporarily commented out for loop
     T_above = copy(interior(snapshot[:T],:,:,71))
     T_below = copy(interior(snapshot[:T],:,:,69))
 
-    field = compute_bgradmag(T_uf,T_above,T_below,α,g,dx,dy,dz)
+    field = compute_bgradmag(T_uf,α,g,dx,dy)
+    dTdz = compute_dAdz(T_above,T_below,dz)
+    dbdz = (α*g) .* dTdz
 
     # quick plot of field
     x, y, _ = nodes(snapshot[:T])
     fig = Figure(size = (700, 640))     # if you want colorbar
-    ax = Axis(fig[1, 1]; aspect = DataAspect())
-    colormap = :binary
+    ax = Axis(fig[1, 1]; aspect = DataAspect(), title = L"$|\nabla b_h|$")
+    colormap = :amp
+    m_field = maximum(abs, field)  # symmetric bound around 0
+    m_field = m_field == 0 ? 1e-10 : m_field   # avoid zero-width colorrange
     hm = heatmap!(ax, 1e-3x, 1e-3y, field;
-                rasterize = true, colormap = colormap, colorscale=log10)
+                rasterize = true, colormap = colormap, colorrange=(0,m_field))
     Colorbar(fig[1, 2], hm)             # if you want colorbar
-    save(filesave * "bgradmag_uf.png", fig; px_per_unit=4)
+    # save(filesave * "bgradmag_uf.png", fig; px_per_unit=4)
 
     # quick plot of spectra 
     S_bgradmag = isotropic_powerspectrum(field, field; Δx=dx, Δy=dy)
     fig = Figure(size = (600, 500))
     axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
-                ylabel = L"E_T(k)/E_T (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
+                ylabel = L"E_{|\nabla b_h|}(k)/E_{|\nabla b_h|} (k_{min})",     # normalized wrt E at k_min
                 xscale = log10, yscale = log10,
                 limits = ((10^-4.5, 10^0.5), (1e-17,1e3)))
     ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
@@ -686,40 +690,19 @@ i = 97  # temporarily commented out for loop
     vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
     save(filesave * "spectra_bgradmag_uf.png", fig)
 
-    # grid = field.grid
-    # Δx = minimum(xspacings(grid, Center()))
-    # Δy = minimum(yspacings(grid, Center()))
-
-    # data = Array(interior(field,:,:,k))  # bring to CPU physical-space array
-    # Nx, Ny = size(data, 1), size(data, 2)
-
-    Nx, Ny = size(field, 1), size(field, 2)
-
-    # Angular wavenumbers associated with the horizontal FFT
-    kx = 2π .* fftfreq(Nx, 1/dx)
-    ky = 2π .* fftfreq(Ny, 1/dy)
-
-    # K = 2π / smooth          # cutoff wavenumber for this smoothing scale
-    # κ² = (kx .^ 2) .+ (ky' .^ 2)
-    # mask = κ² .<= K^2        # true where κ ≤ K (keep), false where κ > K (zero)
-
-    # filtered = similar(data)
-
-    # f̂ = fft(data)
-    # f̂ .*= mask
-    # filtered .= real.(ifft(f̂))
-
     cutoffs = [1e4, 1e3, 1e2, 1e1, 1e0]
     bands = bandpass_filter(field, dx, dy, cutoffs)
 
-    # access a specific band
-    bands["κ ≤ 2π/10000.0"]
-    bands["2π/10000.0 < κ ≤ 2π/1000.0"]
-    bands["2π/1000.0 < κ ≤ 2π/100.0"]
-    bands["2π/100.0 < κ ≤ 2π/10.0"]
-    bands["2π/10.0 < κ ≤ 2π/1.0"]
+    # # access a specific band
+    # bands["κ ≤ 2π/10000.0"]
+    # bands["2π/10000.0 < κ ≤ 2π/1000.0"]
+    # bands["2π/1000.0 < κ ≤ 2π/100.0"]
+    # bands["2π/100.0 < κ ≤ 2π/10.0"]
+    # bands["2π/10.0 < κ ≤ 2π/1.0"]
 
-    labels = collect(keys(bands))
+    # labels = collect(keys(bands))   # unsorted
+    labels = ["κ ≤ 2π/10000.0", "2π/10000.0 < κ ≤ 2π/1000.0", "2π/1000.0 < κ ≤ 2π/100.0",   # sorted 
+                "2π/100.0 < κ ≤ 2π/10.0", "2π/10.0 < κ ≤ 2π/1.0", "κ > 2π/1.0"]
     n = length(labels)
     ncols_ = 3
     nrows_ = ceil(Int, n / ncols_)
@@ -734,14 +717,221 @@ i = 97  # temporarily commented out for loop
 
         m = maximum(abs, data)  # symmetric bound around 0
         m = m == 0 ? 1e-10 : m   # avoid zero-width colorrange
-        hm = heatmap!(ax, 1e-3x, 1e-3y, data, colormap = :balance, colorrange = (-m, m))
-        Colorbar(fig[row, col+ncols_], hm, width = 10)
+        hm = heatmap!(ax, 1e-3x, 1e-3y, data, colormap = :balance, colorrange = (-2e-5, 2e-5))
+        Colorbar(fig[row, col+ncols_], hm, width = 10; label = L"\text{reconstructed } $|\nabla b_h|$")
     end
     # save(filesave * "bands_bgradmag_uf.png", fig)
 
-    # julia> extrema(bands["κ ≤ 2π/10000.0"])
-    # (3.728470647715559e-6, 3.728470647715559e-6)
+    # # Useless plot of bgradmag squared
+    # fig = Figure(size = (400*ncols_, 350*nrows_))
+    # for (idx, label) in enumerate(labels)
+    #     row = div(idx - 1, ncols_) + 1
+    #     col = mod(idx - 1, ncols_) + 1
 
+    #     ax = Axis(fig[row, col], title = label, aspect = DataAspect())
+    #     data = bands[label] .^ 2
+
+    #     m = maximum(abs, data)  # symmetric bound around 0
+    #     m = m == 0 ? 1e-16 : m   # avoid zero-width colorrange
+    #     hm = heatmap!(ax, 1e-3x, 1e-3y, data, colormap = :amp, colorrange = (0, 1e-11))
+    #     Colorbar(fig[row, col+ncols_], hm, width = 10; label = L"\text{reconstructed } $|\nabla b_h|^2$")
+    # end
+    # # save(filesave * "bands_bgradmagsquared_uf.png", fig)
+
+    # Extrema of bands
+    # julia> extrema(bands["κ ≤ 2π/10000.0"])
+    # (1.367743253396196e-6, 1.367743253396196e-6)
+    # julia> extrema(bands["2π/10000.0 < κ ≤ 2π/1000.0"])
+    # (-1.4721677960247549e-6, 2.7241948733091438e-6)
+    # julia> extrema(bands["2π/1000.0 < κ ≤ 2π/100.0"])
+    # (-9.373607586752127e-6, 1.8252773497426324e-5)
+    # julia> extrema(bands["2π/100.0 < κ ≤ 2π/10.0"])
+    # (-2.9840358924229248e-5, 0.00016119601865659347)
+    # julia> extrema(bands["2π/10.0 < κ ≤ 2π/1.0"])
+    # (-1.8261886925726886e-5, 1.9952158482386392e-5)
+
+    # Extrema of bands squared
+    # julia> extrema(bands["κ ≤ 2π/10000.0"].^2)
+    # (1.870721607210811e-12, 1.870721607210811e-12)
+    # julia> extrema(bands["2π/10000.0 < κ ≤ 2π/1000.0"].^2)
+    # (1.0653826322057696e-25, 7.421237707763823e-12)
+    # julia> extrema(bands["2π/1000.0 < κ ≤ 2π/100.0"].^2)
+    # (3.1800156390852164e-28, 3.331637403483488e-10)
+    # julia> extrema(bands["2π/100.0 < κ ≤ 2π/10.0"].^2)
+    # (2.7267589554592325e-25, 2.598415643073683e-8)
+    # julia> extrema(bands["2π/10.0 < κ ≤ 2π/1.0"].^2)
+    # (2.294106309503896e-26, 3.9808862810626327e-10)
+
+    # Sum bands together 
+    band_sum = (bands["κ ≤ 2π/10000.0"] + bands["2π/10000.0 < κ ≤ 2π/1000.0"] + bands["2π/1000.0 < κ ≤ 2π/100.0"]
+                + bands["2π/100.0 < κ ≤ 2π/10.0"] + bands["2π/10.0 < κ ≤ 2π/1.0"])
+
+    # quick plot of sum of bands 
+    x, y, _ = nodes(snapshot[:T])
+    fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect(), title = L"Sum of bands of $|\nabla b_h|$")
+    colormap = :amp
+    hm = heatmap!(ax, 1e-3x, 1e-3y, band_sum;
+                rasterize = true, colormap = colormap, colorrange=(0,m_field))
+    Colorbar(fig[1, 2], hm)             # if you want colorbar
+    # save(filesave * "bgradmag_bandsum_uf.png", fig; px_per_unit=4)
+
+    # julia> maximum(field-band_sum)
+    # 8.131516293641283e-20
+
+    # to-do 
+    # - observe these in terms of spectra with much, much narrower bands
+    # - color the spectra plot by its max frontal sharpness
+    # 
+
+    # ---
+
+    # quick plot of db/dz
+    x, y, _ = nodes(snapshot[:T])
+    fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect(), title = L"$\frac{\partial b}{\partial z}$")
+    colormap = :balance
+    m_dbdz = maximum(abs, dbdz)  # symmetric bound around 0
+    m_dbdz = m_dbdz == 0 ? 1e-10 : m_dbdz   # avoid zero-width colorrange
+    hm = heatmap!(ax, 1e-3x, 1e-3y, dbdz;
+                rasterize = true, colormap = colormap, colorrange=(-m_dbdz,m_dbdz))
+    Colorbar(fig[1, 2], hm)             # if you want colorbar
+    save(filesave * "dbdz_uf.png", fig; px_per_unit=4)
+
+    # quick plot of spectra of db/dz
+    S_dbdz = isotropic_powerspectrum(dbdz, dbdz; Δx=dx, Δy=dy)
+    fig = Figure(size = (600, 500))
+    axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
+                ylabel = L"E_{db/dz}(k)/E_{db/dz} (k_{min})",     # normalized wrt E at k_min
+                xscale = log10, yscale = log10,
+                limits = ((10^-4.5, 10^0.5), (1e-17,1e3)))
+    ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
+    global St0 = S_dbdz
+    lines!(ax, S_dbdz.freq, Real.(S_dbdz.spec./St0.spec[1]))
+    xlims!(ax, (10^-4.5, 10^0.5))
+    vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
+    save(filesave * "spectra_dbdz_uf.png", fig)
+
+    cutoffs = [1e4, 1e3, 1e2, 1e1, 1e0]
+    bands_dbdz = bandpass_filter(dbdz, dx, dy, cutoffs)
+
+    labels = ["κ ≤ 2π/10000.0", "2π/10000.0 < κ ≤ 2π/1000.0", "2π/1000.0 < κ ≤ 2π/100.0",   # sorted 
+                "2π/100.0 < κ ≤ 2π/10.0", "2π/10.0 < κ ≤ 2π/1.0", "κ > 2π/1.0"]
+    n = length(labels)
+    ncols_ = 3
+    nrows_ = ceil(Int, n / ncols_)
+
+    fig = Figure(size = (400*ncols_, 350*nrows_))
+    for (idx, label) in enumerate(labels)
+        row = div(idx - 1, ncols_) + 1
+        col = mod(idx - 1, ncols_) + 1
+
+        ax = Axis(fig[row, col], title = label, aspect = DataAspect())
+        data = bands_dbdz[label]
+
+        m = maximum(abs, data)  # symmetric bound around 0
+        m = m == 0 ? 1e-10 : m   # avoid zero-width colorrange
+        hm = heatmap!(ax, 1e-3x, 1e-3y, data, colormap = :balance, colorrange = (-2e-5, 2e-5))
+        Colorbar(fig[row, col+ncols_], hm, width = 10; label = L"\text{reconstructed } $\frac{\partial b}{\partial z}$")
+    end
+    save(filesave * "bands_dbdz_uf.png", fig)
+
+    # ---
+
+    # Color spectra plot according to max bgradmag in each band regime
+
+    freqs = collect(S_bgradmag.freq)
+    spec_normalized = Real.(S_bgradmag.spec ./ S_bgradmag.spec[1])
+
+    # --- band-based coloring ---
+    # cutoffs = [1e4, 1e3, 1e2, 1e1, 1e0]
+    cutoffs = 10 .^ range(4, 0, length=100)   # 100 log-spaced values from 1e4 down to 1e0
+    bands = bandpass_filter(field, dx, dy, cutoffs)
+
+    K = 2π ./ cutoffs                      # band edge wavenumbers, increasing
+    labels = ["κ ≤ 2π/$(cutoffs[1])",
+            ["2π/$(cutoffs[n]) < κ ≤ 2π/$(cutoffs[n+1])" for n in 1:length(cutoffs)-1]...,
+            "κ > 2π/$(cutoffs[end])"]
+
+    band_max_bgradmag = [maximum(abs, bands[label]) for label in labels]  # from your bandpass_filter output on `field`
+
+    color_vals = similar(freqs, Float64)
+    for (i, κ) in enumerate(freqs)
+        if κ <= K[1]
+            color_vals[i] = band_max_bgradmag[1]
+        elseif κ > K[end]
+            color_vals[i] = band_max_bgradmag[end]
+        else
+            band_idx = findfirst(n -> κ <= K[n+1], 1:length(K)-1) + 1
+            color_vals[i] = band_max_bgradmag[band_idx]
+        end
+    end
+
+    # --- plot ---
+    fig = Figure(size = (600, 500))
+    axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",
+                ylabel = L"E_{|\nabla b_h|}(k)/E_{|\nabla b_h|} (k_{min})",
+                xscale = log10, yscale = log10,
+                limits = ((10^-4.5, 10^0.5), (1e-17,1e3)))
+    ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
+
+    lp = lines!(ax, freqs, spec_normalized, color = color_vals,
+                colormap = :amp, linewidth = 2)
+
+    Colorbar(fig[1,2], lp, label = L"\max |\nabla b|\text{ in band}")
+
+    xlims!(ax, (10^-4.5, 10^0.5))
+    vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
+    save(filesave * "spectracolor_bgradmag_uf.png", fig)
+
+    # ---
+
+    # Color spectra plot according to max dbdz in each band regime
+
+    freqs = collect(S_dbdz.freq)
+    spec_normalized = Real.(S_dbdz.spec ./ S_dbdz.spec[1])
+
+    # --- band-based coloring ---
+    cutoffs = [1e4, 1e3, 1e2, 1e1, 1e0]
+    # cutoffs = 10 .^ range(4, 0, length=100)   # 100 log-spaced values from 1e4 down to 1e0
+    bands_dbdz = bandpass_filter(dbdz, dx, dy, cutoffs)
+
+    K = 2π ./ cutoffs                      # band edge wavenumbers, increasing
+    labels = ["κ ≤ 2π/$(cutoffs[1])",
+            ["2π/$(cutoffs[n]) < κ ≤ 2π/$(cutoffs[n+1])" for n in 1:length(cutoffs)-1]...,
+            "κ > 2π/$(cutoffs[end])"]
+
+    band_max_dbdz = [maximum(abs, bands_dbdz[label]) for label in labels]
+
+    color_vals = similar(freqs, Float64)
+    for (i, κ) in enumerate(freqs)
+        if κ <= K[1]
+            color_vals[i] = band_max_dbdz[1]
+        elseif κ > K[end]
+            color_vals[i] = band_max_dbdz[end]
+        else
+            band_idx = findfirst(n -> κ <= K[n+1], 1:length(K)-1) + 1
+            color_vals[i] = band_max_dbdz[band_idx]
+        end
+    end
+
+    # --- plot ---
+    fig = Figure(size = (600, 500))
+    axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",
+                ylabel = L"E_{\frac{\partial b}{\partial z}}(k)/E_{\frac{\partial b}{\partial z}} (k_{min})",
+                xscale = log10, yscale = log10,
+                limits = ((10^-4.5, 10^0.5), (1e-17,1e3)))
+    ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
+
+    lp = lines!(ax, freqs, spec_normalized, color = color_vals,
+                colormap = :amp, linewidth = 2)
+
+    Colorbar(fig[1,2], lp, label = L"\max {|\frac{\partial b}{\partial z}|} \text{ in band}")
+
+    xlims!(ax, (10^-4.5, 10^0.5))
+    vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
+    save(filesave * "spectracolor_dbdz_uf.png", fig)
+    
     # ---
 
     # # update max and min T
