@@ -26,7 +26,7 @@ end
 filehead = "./LESStudySetup/"
 filename = filehead * "hydrostatic_snapshots_" * fileparams * ".jld2"
 metadata = filehead * "experiment_" * fileparams * "_metadata.jld2"
-filesave = "/home/asrobang/orcd/scratch/figures/20260717_hy_spectra/"
+filesave = "/home/asrobang/orcd/scratch/figures/20260913_regionABC_figs/"
 
 # --- Set parameters ---
 set_value!(; Δh = 156.25)    # horizontal spacing
@@ -275,7 +275,7 @@ fig = Figure(size = (600, 500))
 axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
                 ylabel = L"E_T(k)/E_T (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
                 xscale = log10, yscale = log10,
-                limits = ((10^-3.5, 10^0.5), (1e-10,1e2))
+                limits = ((10^-4.5, 10^0.5), (1e-12,1e3))
                 )
 
 ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
@@ -308,7 +308,7 @@ lines!(ax, St_d55.freq, Real.(St_d55.spec./St0.spec[1]), color = colors[6], labe
 lines!(ax, St_d65.freq, Real.(St_d65.spec./St0.spec[1]), color = colors[7], label = "Day 6.5")
 lines!(ax, St_d75.freq, Real.(St_d75.spec./St0.spec[1]), color = colors[8], label = "Day 7.5")
 
-xlims!(ax, (10^-3.5, 10^0.5))
+xlims!(ax, (10^-4.5, 10^0.5))
 
 # Vertical line corresponding to wavenumber at wavelength = 10^4 m = 10 km (refers to a 10km spatial scale)
 # Anything to the left is motions larger than 10km
@@ -326,7 +326,7 @@ fig = Figure(size = (600, 500))
 axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
                 ylabel = L"E_u(k)/E_u (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
                 xscale = log10, yscale = log10,
-                limits = ((10^-3.5, 10^0.5), (1e-10,1e2))
+                limits = ((10^-4.5, 10^0.5), (1e-12,1e3))
                 )
 ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
 
@@ -340,7 +340,7 @@ lines!(ax, Su_d55.freq, Real.(Su_d55.spec./Su0.spec[1]), color = colors[6], labe
 lines!(ax, Su_d65.freq, Real.(Su_d65.spec./Su0.spec[1]), color = colors[7], label = "Day 6.5")
 lines!(ax, Su_d75.freq, Real.(Su_d75.spec./Su0.spec[1]), color = colors[8], label = "Day 7.5")
 
-xlims!(ax, (10^-3.5, 10^0.5))
+xlims!(ax, (10^-4.5, 10^0.5))
 vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
 axislegend(ax, labelsize=10, patchsize = (20, 5), position = (:left, :bottom))
 
@@ -352,7 +352,7 @@ fig = Figure(size = (600, 500))
 axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
                 ylabel = L"E_v(k)/E_v (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
                 xscale = log10, yscale = log10,
-                limits = ((10^-3.5, 10^0.5), (1e-10,1e2))
+                limits = ((10^-4.5, 10^0.5), (1e-12,1e3))
                 )
 ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
 
@@ -366,7 +366,7 @@ lines!(ax, Sv_d55.freq, Real.(Sv_d55.spec./Sv0.spec[1]), color = colors[6], labe
 lines!(ax, Sv_d65.freq, Real.(Sv_d65.spec./Sv0.spec[1]), color = colors[7], label = "Day 6.5")
 lines!(ax, Sv_d75.freq, Real.(Sv_d75.spec./Sv0.spec[1]), color = colors[8], label = "Day 7.5")
 
-xlims!(ax, (10^-3.5, 10^0.5))
+xlims!(ax, (10^-4.5, 10^0.5))
 vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
 axislegend(ax, labelsize=10, patchsize = (20, 5), position = (:left, :bottom))
 
@@ -378,7 +378,7 @@ fig = Figure(size = (600, 500))
 axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumber k 
                 ylabel = L"E_w(k)/E_w (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
                 xscale = log10, yscale = log10,
-                limits = ((10^-3.5, 10^0.5), (1e-10,1e2))
+                limits = ((10^-4.5, 10^0.5), (1e-12,1e3))
                 )
 ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
 
@@ -392,7 +392,7 @@ lines!(ax, Sw_d55.freq, Real.(Sw_d55.spec./Sw0.spec[1]), color = colors[6], labe
 lines!(ax, Sw_d65.freq, Real.(Sw_d65.spec./Sw0.spec[1]), color = colors[7], label = "Day 6.5")
 lines!(ax, Sw_d75.freq, Real.(Sw_d75.spec./Sw0.spec[1]), color = colors[8], label = "Day 7.5")
 
-xlims!(ax, (10^-3.5, 10^0.5))
+xlims!(ax, (10^-4.5, 10^0.5))
 vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
 axislegend(ax, labelsize=10, patchsize = (20, 5), position = (:left, :bottom))
 
