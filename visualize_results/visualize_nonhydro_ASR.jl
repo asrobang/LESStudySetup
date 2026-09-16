@@ -112,8 +112,6 @@ function filter(field, k, smooth)
     return filtered
 end
 
-using FFTW
-
 """
     bandpass_filter(field, dx, dy, cutoffs)
 
