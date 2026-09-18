@@ -157,6 +157,138 @@ function bandmax_color_vals(freqs, band_max, K)
     return color_vals
 end
 
+function compute_load_pv(pv_cache_file, filehead, fileparam, iteration, dx, dy, dz, α, g, f, filter_scale)
+    if isfile(pv_cache_file)
+        println("Loading cached PV variables from $pv_cache_file...")
+        x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f =
+            load(pv_cache_file, "x", "y", "horizontalq_uf", "verticalq_uf", "q_uf",
+                "horizontalq_f", "verticalq_f", "q_f")
+    else
+        # --- Compute gradients for T ---
+
+        output_filename = filehead * "subdomain_T_" * fileparam * "_iter$(iteration).jld2"      # Load T field
+        snapshot = load_subdomain_snapshot(output_filename)
+
+        x, y, _ = nodes(snapshot[:T])                           # call this one time to get x and y coords
+
+        T_uf = copy(interior(snapshot[:T],:,:,70))              # 2048×2048 Matrix{Float32}
+        T_above = copy(interior(snapshot[:T],:,:,71))
+        T_below = copy(interior(snapshot[:T],:,:,69))
+        dTdx, dTdy = compute_dAdx_dAdy(T_uf,dx,dy) 
+        dTdz = compute_dAdz(T_above,T_below,dz)
+        println("Computed unfiltered T gradients")
+        T_uf, T_above, T_below = nothing, nothing, nothing      # free the variable
+        GC.gc()                                                 # force the garbage collector to run immediately
+
+        T_f = filter(snapshot[:T], 70, filter_scale)            # 2048×2048 Matrix{Float32}
+        T_f_above = filter(snapshot[:T], 71, filter_scale)
+        T_f_below = filter(snapshot[:T], 69, filter_scale)
+        dTdx_f, dTdy_f = compute_dAdx_dAdy(T_f,dx,dy) 
+        dTdz_f = compute_dAdz(T_f_above,T_f_below,dz)
+        println("Computed filtered T gradients")
+        T_f, T_f_above, T_f_below = nothing, nothing, nothing   # free the variable
+        snapshot = nothing
+        GC.gc()                                                 # force the garbage collector to run immediately
+
+        # --- Compute gradients for u ---
+
+        output_filename = filehead * "subdomain_u_" * fileparam * "_iter$(iteration).jld2"      # Load T field
+        snapshot = load_subdomain_snapshot(output_filename)
+
+        u_uf = copy(interior(snapshot[:u],:,:,70)[1:end-1, :])        # initially 2049×2048 Matrix{Float32}
+        u_above = copy(interior(snapshot[:u],:,:,71)[1:end-1, :])
+        u_below = copy(interior(snapshot[:u],:,:,69)[1:end-1, :])
+        dudx, dudy = compute_dAdx_dAdy(u_uf,dx,dy) 
+        dudz = compute_dAdz(u_above,u_below,dz)
+        println("Computed unfiltered u gradients")
+        u_uf, u_above, u_below = nothing, nothing, nothing      # free the variable
+        GC.gc()                                                 # force the garbage collector to run immediately
+
+        u_f = filter(snapshot[:u], 70, filter_scale)[1:end-1, :]  # initially 2049×2048 Matrix{Float32}
+        u_f_above = filter(snapshot[:u], 71, filter_scale)[1:end-1, :]
+        u_f_below = filter(snapshot[:u], 69, filter_scale)[1:end-1, :]
+        dudx_f, dudy_f = compute_dAdx_dAdy(u_f,dx,dy) 
+        dudz_f = compute_dAdz(u_f_above,u_f_below,dz)
+        println("Computed filtered u gradients")
+        u_f, u_f_above, u_f_below = nothing, nothing, nothing   # free the variable
+        snapshot = nothing
+        GC.gc()                                                 # force the garbage collector to run immediately
+
+        # --- Compute gradients for v ---
+
+        output_filename = filehead * "subdomain_v_" * fileparam * "_iter$(iteration).jld2"      # Load T field
+        snapshot = load_subdomain_snapshot(output_filename)
+
+        v_uf = copy(interior(snapshot[:v],:,:,70)[:, 1:end-1])        # initially 2048×2049 Matrix{Float32}
+        v_above = copy(interior(snapshot[:v],:,:,71)[:, 1:end-1])
+        v_below = copy(interior(snapshot[:v],:,:,69)[:, 1:end-1])
+        dvdx, dvdy = compute_dAdx_dAdy(v_uf,dx,dy) 
+        dvdz = compute_dAdz(v_above,v_below,dz)
+        println("Computed unfiltered v gradients")
+        v_uf, v_above, v_below = nothing, nothing, nothing      # free the variable
+        GC.gc()                                                 # force the garbage collector to run immediately
+
+        v_f = filter(snapshot[:v], 70, filter_scale)[:, 1:end-1]  # initially 2048×2049 Matrix{Float32}
+        v_f_above = filter(snapshot[:v], 71, filter_scale)[:, 1:end-1]
+        v_f_below = filter(snapshot[:v], 69, filter_scale)[:, 1:end-1]
+        dvdx_f, dvdy_f = compute_dAdx_dAdy(v_f,dx,dy) 
+        dvdz_f = compute_dAdz(v_f_above,v_f_below,dz)
+        println("Computed filtered v gradients")
+        v_f, v_f_above, v_f_below = nothing, nothing, nothing   # free the variable
+        snapshot = nothing
+        GC.gc()                                                 # force the garbage collector to run immediately
+
+        # --- Compute gradients for w ---
+
+        output_filename = filehead * "subdomain_w_" * fileparam * "_iter$(iteration).jld2"      # Load T field
+        snapshot = load_subdomain_snapshot(output_filename)
+
+        w_uf = copy(interior(snapshot[:w],:,:,70))                    # 2048×2048 Matrix{Float32}
+        w_above = copy(interior(snapshot[:w],:,:,71))
+        w_below = copy(interior(snapshot[:w],:,:,69))
+        dwdx, dwdy = compute_dAdx_dAdy(w_uf,dx,dy) 
+        println("Computed unfiltered w gradients")
+        w_uf, w_above, w_below = nothing, nothing, nothing      # free the variable
+        GC.gc()                                                 # force the garbage collector to run immediately
+
+        w_f = filter(snapshot[:w], 70, filter_scale)            # 2048×2048 Matrix{Float32}
+        w_f_above = filter(snapshot[:w], 71, filter_scale)
+        w_f_below = filter(snapshot[:w], 69, filter_scale)
+        dwdx_f, dwdy_f = compute_dAdx_dAdy(w_f,dx,dy) 
+        println("Computed filtered w gradients")
+        w_f, w_f_above, w_f_below = nothing, nothing, nothing   # free the variable
+        snapshot = nothing
+        GC.gc()                                                 # force the garbage collector to run immediately
+
+        # --- Unfiltered Ertel PV (q_uf) ---
+
+        # Compute unfiltered PV (q_uf)
+        horizontalq_uf = (α*g) .* ( dTdx .* (dwdy.-dvdz) .+ dTdy .* (dudz.-dwdx) )      # horizontal q
+        verticalq_uf = (α*g) .* ( dTdz .* (dvdx.-dudy.+f) )                        # vertical q
+        q_uf = horizontalq_uf + verticalq_uf
+
+        # --- Filtered Ertel PV (q_f) ---
+
+        # Compute filtered PV (q_f)
+        horizontalq_f = (α*g) .* ( dTdx_f .* (dwdy_f.-dvdz_f) .+ dTdy_f .* (dudz_f.-dwdx_f) )   # horizontal q
+        verticalq_f = (α*g) .* ( dTdz_f .* (dvdx_f.-dudy_f.+f) )                           # vertical q
+        q_f = horizontalq_f + verticalq_f
+
+        # --- Clean up memory ---
+        dTdx, dTdy, dTdz, dudx, dudy, dudz, dvdx, dvdy, dvdz, dwdx, dwdy = ntuple(i -> nothing, 11)
+        dTdx_f, dTdy_f, dTdz_f, dudx_f, dudy_f, dudz_f, dvdx_f, dvdy_f, dvdz_f, dwdx_f, dwdy_f = ntuple(i -> nothing, 11)
+        GC.gc()                                                 # force the garbage collector to run immediately
+
+        # --- Save computed PV variables to cache so future runs can skip recomputation ---
+        mkpath(filesave)
+        jldsave(pv_cache_file; x, y, horizontalq_uf, verticalq_uf, q_uf,
+                horizontalq_f, verticalq_f, q_f)
+        println("Saved cached PV variables to $pv_cache_file")
+    end # if isfile(pv_cache_file)
+
+    return x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f
+end 
+
 function plot_filteredPV(snapshot, fileparam)
     filter_scale = 300                                      # meters, bound between submesoscale and BLT
 
@@ -266,7 +398,7 @@ println("Iteration: $(iteration)")
 # output_filename = filehead * fileparam * "_iter$(iteration).jld2"
 
 # Region A/B/C
-region = "A"
+region = "C"
 println("--- Region $(region) ---")
 fileparam = "region" * string(region)
 
@@ -281,139 +413,14 @@ fileparam = "region" * string(region)
 # # 3. Compute filtered potential vorticity (for 10x10km tiles where snapshot contains [:T,:u,:v,:w])
 # plot_filteredPV(snapshot, fileparam)
 
-# --- Cache of computed PV variables (x, y, tilting/stretching/q, filtered & unfiltered) ---
+# --- Cache of computed PV variables (x, y, horizontalq/verticalq/q, filtered & unfiltered) ---
 pv_cache_file = filesave * fileparam * "_iter$(iteration)_pv.jld2"
 
-if isfile(pv_cache_file)
-    println("Loading cached PV variables from $pv_cache_file...")
-    x, y, tilting_uf, stretching_uf, q_uf, tilting_f, stretching_f, q_f =
-        load(pv_cache_file, "x", "y", "tilting_uf", "stretching_uf", "q_uf",
-             "tilting_f", "stretching_f", "q_f")
-else
-    # --- Compute gradients for T ---
+filter_scale = 300                                      # meters, bound between submesoscale and BLT
 
-    output_filename = filehead * "subdomain_T_" * fileparam * "_iter$(iteration).jld2"      # Load T field
-    snapshot = load_subdomain_snapshot(output_filename)
-
-    x, y, _ = nodes(snapshot[:T])                           # call this one time to get x and y coords
-
-    filter_scale = 300                                      # meters, bound between submesoscale and BLT
-
-    T_uf = copy(interior(snapshot[:T],:,:,70))              # 2048×2048 Matrix{Float32}
-    T_above = copy(interior(snapshot[:T],:,:,71))
-    T_below = copy(interior(snapshot[:T],:,:,69))
-    dTdx, dTdy = compute_dAdx_dAdy(T_uf,dx,dy) 
-    dTdz = compute_dAdz(T_above,T_below,dz)
-    println("Computed unfiltered T gradients")
-    T_uf, T_above, T_below = nothing, nothing, nothing      # free the variable
-    GC.gc()                                                 # force the garbage collector to run immediately
-
-    T_f = filter(snapshot[:T], 70, filter_scale)            # 2048×2048 Matrix{Float32}
-    T_f_above = filter(snapshot[:T], 71, filter_scale)
-    T_f_below = filter(snapshot[:T], 69, filter_scale)
-    dTdx_f, dTdy_f = compute_dAdx_dAdy(T_f,dx,dy) 
-    dTdz_f = compute_dAdz(T_f_above,T_f_below,dz)
-    println("Computed filtered T gradients")
-    T_f, T_f_above, T_f_below = nothing, nothing, nothing   # free the variable
-    snapshot = nothing
-    GC.gc()                                                 # force the garbage collector to run immediately
-
-    # --- Compute gradients for u ---
-
-    output_filename = filehead * "subdomain_u_" * fileparam * "_iter$(iteration).jld2"      # Load T field
-    snapshot = load_subdomain_snapshot(output_filename)
-
-    u_uf = copy(interior(snapshot[:u],:,:,70)[1:end-1, :])        # initially 2049×2048 Matrix{Float32}
-    u_above = copy(interior(snapshot[:u],:,:,71)[1:end-1, :])
-    u_below = copy(interior(snapshot[:u],:,:,69)[1:end-1, :])
-    dudx, dudy = compute_dAdx_dAdy(u_uf,dx,dy) 
-    dudz = compute_dAdz(u_above,u_below,dz)
-    println("Computed unfiltered u gradients")
-    u_uf, u_above, u_below = nothing, nothing, nothing      # free the variable
-    GC.gc()                                                 # force the garbage collector to run immediately
-
-    u_f = filter(snapshot[:u], 70, filter_scale)[1:end-1, :]  # initially 2049×2048 Matrix{Float32}
-    u_f_above = filter(snapshot[:u], 71, filter_scale)[1:end-1, :]
-    u_f_below = filter(snapshot[:u], 69, filter_scale)[1:end-1, :]
-    dudx_f, dudy_f = compute_dAdx_dAdy(u_f,dx,dy) 
-    dudz_f = compute_dAdz(u_f_above,u_f_below,dz)
-    println("Computed filtered u gradients")
-    u_f, u_f_above, u_f_below = nothing, nothing, nothing   # free the variable
-    snapshot = nothing
-    GC.gc()                                                 # force the garbage collector to run immediately
-
-    # --- Compute gradients for v ---
-
-    output_filename = filehead * "subdomain_v_" * fileparam * "_iter$(iteration).jld2"      # Load T field
-    snapshot = load_subdomain_snapshot(output_filename)
-
-    v_uf = copy(interior(snapshot[:v],:,:,70)[:, 1:end-1])        # initially 2048×2049 Matrix{Float32}
-    v_above = copy(interior(snapshot[:v],:,:,71)[:, 1:end-1])
-    v_below = copy(interior(snapshot[:v],:,:,69)[:, 1:end-1])
-    dvdx, dvdy = compute_dAdx_dAdy(v_uf,dx,dy) 
-    dvdz = compute_dAdz(v_above,v_below,dz)
-    println("Computed unfiltered v gradients")
-    v_uf, v_above, v_below = nothing, nothing, nothing      # free the variable
-    GC.gc()                                                 # force the garbage collector to run immediately
-
-    v_f = filter(snapshot[:v], 70, filter_scale)[:, 1:end-1]  # initially 2048×2049 Matrix{Float32}
-    v_f_above = filter(snapshot[:v], 71, filter_scale)[:, 1:end-1]
-    v_f_below = filter(snapshot[:v], 69, filter_scale)[:, 1:end-1]
-    dvdx_f, dvdy_f = compute_dAdx_dAdy(v_f,dx,dy) 
-    dvdz_f = compute_dAdz(v_f_above,v_f_below,dz)
-    println("Computed filtered v gradients")
-    v_f, v_f_above, v_f_below = nothing, nothing, nothing   # free the variable
-    snapshot = nothing
-    GC.gc()                                                 # force the garbage collector to run immediately
-
-    # --- Compute gradients for w ---
-
-    output_filename = filehead * "subdomain_w_" * fileparam * "_iter$(iteration).jld2"      # Load T field
-    snapshot = load_subdomain_snapshot(output_filename)
-
-    w_uf = copy(interior(snapshot[:w],:,:,70))                    # 2048×2048 Matrix{Float32}
-    w_above = copy(interior(snapshot[:w],:,:,71))
-    w_below = copy(interior(snapshot[:w],:,:,69))
-    dwdx, dwdy = compute_dAdx_dAdy(w_uf,dx,dy) 
-    println("Computed unfiltered w gradients")
-    w_uf, w_above, w_below = nothing, nothing, nothing      # free the variable
-    GC.gc()                                                 # force the garbage collector to run immediately
-
-    w_f = filter(snapshot[:w], 70, filter_scale)            # 2048×2048 Matrix{Float32}
-    w_f_above = filter(snapshot[:w], 71, filter_scale)
-    w_f_below = filter(snapshot[:w], 69, filter_scale)
-    dwdx_f, dwdy_f = compute_dAdx_dAdy(w_f,dx,dy) 
-    println("Computed filtered w gradients")
-    w_f, w_f_above, w_f_below = nothing, nothing, nothing   # free the variable
-    snapshot = nothing
-    GC.gc()                                                 # force the garbage collector to run immediately
-
-    # --- Unfiltered Ertel PV (q_uf) ---
-
-    # Compute unfiltered PV (q_uf)
-    tilting_uf = (α*g) .* ( dTdx .* (dwdy.-dvdz) .+ dTdy .* (dudz.-dwdx) )      # baroclinic
-    stretching_uf = (α*g) .* ( dTdz .* (dvdx.-dudy.+f) )                        # barotropic
-    q_uf = tilting_uf + stretching_uf
-
-    # --- Filtered Ertel PV (q_f) ---
-
-    # Compute filtered PV (q_f)
-    tilting_f = (α*g) .* ( dTdx_f .* (dwdy_f.-dvdz_f) .+ dTdy_f .* (dudz_f.-dwdx_f) )   # baroclinic
-    stretching_f = (α*g) .* ( dTdz_f .* (dvdx_f.-dudy_f.+f) )                           # barotropic
-    q_f = tilting_f + stretching_f
-
-    # --- Clean up memory ---
-    dTdx, dTdy, dTdz, dudx, dudy, dudz, dvdx, dvdy, dvdz, dwdx, dwdy = ntuple(i -> nothing, 11)
-    dTdx_f, dTdy_f, dTdz_f, dudx_f, dudy_f, dudz_f, dvdx_f, dvdy_f, dvdz_f, dwdx_f, dwdy_f = ntuple(i -> nothing, 11)
-    GC.gc()                                                 # force the garbage collector to run immediately
-
-    # --- Save computed PV variables to cache so future runs can skip recomputation ---
-    mkpath(filesave)
-    jldsave(pv_cache_file; x, y, tilting_uf, stretching_uf, q_uf,
-            tilting_f, stretching_f, q_f)
-    println("Saved cached PV variables to $pv_cache_file")
-
-end # if isfile(pv_cache_file)
+# Load PV cache file if it exists, or compute PV
+x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f = compute_load_pv(
+            pv_cache_file, filehead, fileparam, iteration, dx, dy, dz, α, g, f, filter_scale)
 
 # Plot of q_uf field
 fig = Figure(size = (700, 640))     # if you want colorbar
@@ -421,32 +428,32 @@ ax = Axis(fig[1, 1]; aspect = DataAspect(),
     title=fileparam * ": Unfiltered Ertel PV (min $(@sprintf("%.1e", minimum(q_uf))), max $(@sprintf("%.1e", maximum(q_uf))))")
 colormap = :balance
 hm = heatmap!(ax, 1e-3x, 1e-3y, q_uf;
-            rasterize = true, colormap = colormap, colorrange = (-1e-7, 1e-7))
+            rasterize = true, colormap = colormap, colorrange = (-5e-9, 5e-9))
 Colorbar(fig[1, 2], hm, label=L"q_{uf}")             # if you want colorbar
 save(filesave * fileparam * "_q_uf.png", fig; px_per_unit=4)
 println("Saved figure of unfiltered q")
 
-# Plot of tilting_uf field
+# Plot of horizontalq_uf field
 fig = Figure(size = (700, 640))     # if you want colorbar
 ax = Axis(fig[1, 1]; aspect = DataAspect(),
-    title=fileparam * ": Unfiltered baroclinic term (min $(@sprintf("%.1e", minimum(tilting_uf))), max $(@sprintf("%.1e", maximum(tilting_uf))))")
+    title=fileparam * ": Unfiltered horizontal q term (min $(@sprintf("%.1e", minimum(horizontalq_uf))), max $(@sprintf("%.1e", maximum(horizontalq_uf))))")
 colormap = :balance
-hm = heatmap!(ax, 1e-3x, 1e-3y, tilting_uf;
-            rasterize = true, colormap = colormap, colorrange = (-1e-7, 1e-7))
-Colorbar(fig[1, 2], hm, label=L"baroclinic")             # if you want colorbar
-save(filesave * fileparam * "_baroclinic_uf.png", fig; px_per_unit=4)
-println("Saved figure of unfiltered baroclinic term")
+hm = heatmap!(ax, 1e-3x, 1e-3y, horizontalq_uf;
+            rasterize = true, colormap = colormap, colorrange = (-5e-9, 5e-9))
+Colorbar(fig[1, 2], hm, label=L"horizontal q")             # if you want colorbar
+save(filesave * fileparam * "_horizontalq_uf.png", fig; px_per_unit=4)
+println("Saved figure of unfiltered horizontal q term")
 
-# Plot of stretching_uf field
+# Plot of verticalq_uf field
 fig = Figure(size = (700, 640))     # if you want colorbar
 ax = Axis(fig[1, 1]; aspect = DataAspect(),
-    title=fileparam * ": Unfiltered barotropic term (min $(@sprintf("%.1e", minimum(stretching_uf))), max $(@sprintf("%.1e", maximum(stretching_uf))))")
+    title=fileparam * ": Unfiltered vertical q term (min $(@sprintf("%.1e", minimum(verticalq_uf))), max $(@sprintf("%.1e", maximum(verticalq_uf))))")
 colormap = :balance
-hm = heatmap!(ax, 1e-3x, 1e-3y, stretching_uf;
-            rasterize = true, colormap = colormap, colorrange = (-1e-7, 1e-7))
-Colorbar(fig[1, 2], hm, label=L"barotropic")             # if you want colorbar
-save(filesave * fileparam * "_barotropic_uf.png", fig; px_per_unit=4)
-println("Saved figure of unfiltered barotropic term")
+hm = heatmap!(ax, 1e-3x, 1e-3y, verticalq_uf;
+            rasterize = true, colormap = colormap, colorrange = (-5e-9, 5e-9))
+Colorbar(fig[1, 2], hm, label=L"vertical q")             # if you want colorbar
+save(filesave * fileparam * "_verticalq_uf.png", fig; px_per_unit=4)
+println("Saved figure of unfiltered vertical q term")
 
 # Plot of q_f field
 fig = Figure(size = (700, 640))     # if you want colorbar
@@ -454,32 +461,32 @@ ax = Axis(fig[1, 1]; aspect = DataAspect(),
     title=fileparam * ": Filtered Ertel PV (min $(@sprintf("%.1e", minimum(q_f))), max $(@sprintf("%.1e", maximum(q_f))))")
 colormap = :balance
 hm = heatmap!(ax, 1e-3x, 1e-3y, q_f;
-            rasterize = true, colormap = colormap, colorrange = (-1e-7, 1e-7))
+            rasterize = true, colormap = colormap, colorrange = (-5e-9, 5e-9))
 Colorbar(fig[1, 2], hm, label=L"q_f")             # if you want colorbar
 save(filesave * fileparam * "_q_f.png", fig; px_per_unit=4)
 println("Saved figure of filtered q")
 
-# Plot of tilting_f field
+# Plot of horizontalq_f field
 fig = Figure(size = (700, 640))     # if you want colorbar
 ax = Axis(fig[1, 1]; aspect = DataAspect(), 
-    title=fileparam * ": Filtered baroclinic term (min $(@sprintf("%.1e", minimum(tilting_f))), max $(@sprintf("%.1e", maximum(tilting_f))))")
+    title=fileparam * ": Filtered horizontal q term (min $(@sprintf("%.1e", minimum(horizontalq_f))), max $(@sprintf("%.1e", maximum(horizontalq_f))))")
 colormap = :balance
-hm = heatmap!(ax, 1e-3x, 1e-3y, tilting_f;
-            rasterize = true, colormap = colormap, colorrange = (-1e-7, 1e-7))
-Colorbar(fig[1, 2], hm, label=L"baroclinic")             # if you want colorbar
-save(filesave * fileparam * "_baroclinic_f.png", fig; px_per_unit=4)
-println("Saved figure of filtered baroclinic term")
+hm = heatmap!(ax, 1e-3x, 1e-3y, horizontalq_f;
+            rasterize = true, colormap = colormap, colorrange = (-5e-9, 5e-9))
+Colorbar(fig[1, 2], hm, label=L"horizontal q")             # if you want colorbar
+save(filesave * fileparam * "_horizontalq_f.png", fig; px_per_unit=4)
+println("Saved figure of filtered horizontal q term")
 
-# Plot of stretching_f field
+# Plot of verticalq_f field
 fig = Figure(size = (700, 640))     # if you want colorbar
 ax = Axis(fig[1, 1]; aspect = DataAspect(), 
-    title=fileparam * ": Filtered barotropic term (min $(@sprintf("%.1e", minimum(stretching_f))), max $(@sprintf("%.1e", maximum(stretching_f))))")
+    title=fileparam * ": Filtered vertical q term (min $(@sprintf("%.1e", minimum(verticalq_f))), max $(@sprintf("%.1e", maximum(verticalq_f))))")
 colormap = :balance
-hm = heatmap!(ax, 1e-3x, 1e-3y, stretching_f;
-            rasterize = true, colormap = colormap, colorrange = (-1e-7, 1e-7))
-Colorbar(fig[1, 2], hm, label=L"barotropic")             # if you want colorbar
-save(filesave * fileparam * "_barotropic_f.png", fig; px_per_unit=4)
-println("Saved figure of filtered barotropic term")
+hm = heatmap!(ax, 1e-3x, 1e-3y, verticalq_f;
+            rasterize = true, colormap = colormap, colorrange = (-5e-9, 5e-9))
+Colorbar(fig[1, 2], hm, label=L"vertical q")             # if you want colorbar
+save(filesave * fileparam * "_verticalq_f.png", fig; px_per_unit=4)
+println("Saved figure of filtered vertical q term")
 
 # # --- Compute and plot spectra for unfiltered q --- 
 
