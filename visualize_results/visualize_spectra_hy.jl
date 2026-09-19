@@ -23,7 +23,7 @@ else
     dTf = @sprintf("%1d", dTf)
     fileparams = "free_surface_short_test_$(cooling)_wind_$(wind)_dTf_$(dTf)_a_$(a)"
 end
-filehead = "./LESStudySetup/"
+filehead = "/orcd/data/abodner/002/shared_datasets/hyles_output/"
 filename = filehead * "hydrostatic_snapshots_" * fileparams * ".jld2"
 metadata = filehead * "experiment_" * fileparams * "_metadata.jld2"
 filesave = "/home/asrobang/orcd/scratch/figures/20260913_regionABC_figs/"
