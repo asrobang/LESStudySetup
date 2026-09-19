@@ -156,7 +156,7 @@ axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",                # wavenumbe
             ylabel = L"E_T(k)/E_T (k_{min},\text{day}=0.5)",     # normalized wrt E at k_min
             xscale = log10, yscale = log10,
             limits = ((10^-4.5, 10^0.5), (1e-17,1e3)))
-ax = Axis(fig[1, 1]; title="z=-8.4375 m", axis_kwargs1...)
+ax = Axis(fig[1, 1]; title="z=-2.8125 m", axis_kwargs1...)
 global St0 = S_bgradmag
 lines!(ax, S_bgradmag.freq, Real.(S_bgradmag.spec./St0.spec[1]))
 xlims!(ax, (10^-4.5, 10^0.5))

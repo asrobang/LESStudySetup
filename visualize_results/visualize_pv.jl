@@ -68,10 +68,18 @@ function filter(field, k, smooth)
 
     data = Array(interior(field,:,:,k))  # bring to CPU physical-space array
     Nx, Ny = size(data, 1), size(data, 2)
+    Lx, Ly = Nx * Δx, Ny * Δy
 
-    # Angular wavenumbers associated with the horizontal FFT
-    kx = 2π .* fftfreq(Nx, 1/dx)
-    ky = 2π .* fftfreq(Ny, 1/dy)
+    # # ONLY if the domain being transformed is periodic 
+    # # Angular wavenumbers associated with the horizontal FFT
+    # kx = 2π .* fftfreq(Nx, 1/dx)
+    # ky = 2π .* fftfreq(Ny, 1/dy)
+
+    # DCT used for zero-gradient domain edges 
+    # Cosine-transform wavenumbers (Neumann / zero-gradient assumption):
+    # note π, not 2π — the fundamental mode has period 2L, not L
+    kx = π .* (0:Nx-1) ./ Lx
+    ky = π .* (0:Ny-1) ./ Ly
 
     K = 2π / smooth          # cutoff wavenumber for this smoothing scale
     κ² = (kx .^ 2) .+ (ky' .^ 2)
@@ -79,9 +87,15 @@ function filter(field, k, smooth)
 
     filtered = similar(data)
 
-    f̂ = fft(data)
+    # # ONLY if the domain being transformed is periodic 
+    # f̂ = fft(data)
+    # f̂ .*= mask
+    # filtered .= real.(ifft(f̂))
+
+    # DCT used for zero-gradient domain edges 
+    f̂ = FFTW.r2r(data, FFTW.REDFT10)   # forward DCT-II
     f̂ .*= mask
-    filtered .= real.(ifft(f̂))
+    filtered = FFTW.r2r(f̂, FFTW.REDFT01) ./ (4 * Nx * Ny)  # inverse DCT-III + normalization
 
     return filtered
 end
@@ -289,6 +303,46 @@ function compute_load_pv(pv_cache_file, filehead, fileparam, iteration, dx, dy, 
     return x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f
 end 
 
+function compute_load_pvspectra(pvspectra_cache_file, labels, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f)
+    if isfile(pvspectra_cache_file)
+        println("Loading cached PV spectra variables from $pvspectra_cache_file...")
+        S_quf, bands_quf, S_qf, bands_qf, S_horquf, S_verquf, S_horqf, S_verqf =
+            load(pvspectra_cache_file, "S_quf", "bands_quf", "S_qf", "bands_qf", "S_horquf", "S_verquf", "S_horqf", "S_verqf")
+    else
+
+        # Compute for spectra and band regimes for q_uf
+        S_quf = isotropic_powerspectrum(q_uf, q_uf; Δx=dx, Δy=dy)
+        println("Computed spectra of unfiltered q")
+        bands_quf = bandpass_filter(q_uf, dx, dy, cutoffs)      # compute bands
+        println("Computed spectra bands of unfiltered q")
+
+        # Compute for spectra and band regimes for q_f
+        S_qf = isotropic_powerspectrum(q_f, q_f; Δx=dx, Δy=dy)
+        println("Computed spectra of filtered q")
+        bands_qf = bandpass_filter(q_f, dx, dy, cutoffs)        # compute bands
+        println("Computed spectra bands of filtered q")
+
+        # Compute for spectra of the horizontal and vertical components of q_uf and q_f
+        S_horquf = isotropic_powerspectrum(horizontalq_uf, horizontalq_uf; Δx=dx, Δy=dy)
+        println("Computed spectra of horizontal component of unfiltered q")
+        S_verquf = isotropic_powerspectrum(verticalq_uf, verticalq_uf; Δx=dx, Δy=dy)
+        println("Computed spectra of vertical component of unfiltered q")
+        S_horqf = isotropic_powerspectrum(horizontalq_f, horizontalq_f; Δx=dx, Δy=dy)
+        println("Computed spectra of horizontal component of filtered q")
+        S_verqf = isotropic_powerspectrum(verticalq_f, verticalq_f; Δx=dx, Δy=dy)
+        println("Computed spectra of vertical component of filtered q")
+
+        mkpath(filesave)
+        jldsave(pvspectra_cache_file; S_quf, bands_quf, S_qf, bands_qf, S_horquf, S_verquf, S_horqf, S_verqf)
+        println("Saved cached PV spectra variables to $pvspectra_cache_file")
+    end # if isfile(pvspectra_cache_file)
+
+    return S_quf, bands_quf, S_qf, bands_qf, S_horquf, S_verquf, S_horqf, S_verqf
+end
+
+### -------------------------------------------------------------------------
+### Plotting functions
+
 function plot_filteredPV(snapshot, fileparam)
     filter_scale = 300                                      # meters, bound between submesoscale and BLT
 
@@ -382,6 +436,141 @@ function plot_filteredPV(snapshot, fileparam)
     # save(filesave * "T_uf.png", fig; px_per_unit=4)
 end
 
+function plot_fieldspectra(x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f; crange_static=(-5e-9,5e-9))
+    # --- Unfiltered fields ---
+
+    # Plot of q_uf field
+    fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect(),
+        title=fileparam * ": Unfiltered Ertel PV (min $(@sprintf("%.1e", minimum(q_uf))), max $(@sprintf("%.1e", maximum(q_uf))))")
+    colormap = :balance
+    hm = heatmap!(ax, 1e-3x, 1e-3y, q_uf;
+                rasterize = true, colormap = colormap, colorrange = crange_static)
+    Colorbar(fig[1, 2], hm, label=L"q_{uf}")             # if you want colorbar
+    save(filesave * fileparam * "_q_uf.png", fig; px_per_unit=4)
+    println("Saved figure of unfiltered q")
+
+    # Plot of horizontalq_uf field
+    fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect(),
+        title=fileparam * ": Unfiltered horizontal q term (min $(@sprintf("%.1e", minimum(horizontalq_uf))), max $(@sprintf("%.1e", maximum(horizontalq_uf))))")
+    colormap = :balance
+    hm = heatmap!(ax, 1e-3x, 1e-3y, horizontalq_uf;
+                rasterize = true, colormap = colormap, colorrange = crange_static)
+    Colorbar(fig[1, 2], hm, label=L"horizontal q")             # if you want colorbar
+    save(filesave * fileparam * "_horizontalq_uf.png", fig; px_per_unit=4)
+    println("Saved figure of unfiltered horizontal q term")
+
+    # Plot of verticalq_uf field
+    fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect(),
+        title=fileparam * ": Unfiltered vertical q term (min $(@sprintf("%.1e", minimum(verticalq_uf))), max $(@sprintf("%.1e", maximum(verticalq_uf))))")
+    colormap = :balance
+    hm = heatmap!(ax, 1e-3x, 1e-3y, verticalq_uf;
+                rasterize = true, colormap = colormap, colorrange = crange_static)
+    Colorbar(fig[1, 2], hm, label=L"vertical q")             # if you want colorbar
+    save(filesave * fileparam * "_verticalq_uf.png", fig; px_per_unit=4)
+    println("Saved figure of unfiltered vertical q term")
+
+    # --- Filtered fields ---
+
+    # Plot of q_f field
+    fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect(), 
+        title=fileparam * ": Filtered Ertel PV (min $(@sprintf("%.1e", minimum(q_f))), max $(@sprintf("%.1e", maximum(q_f))))")
+    colormap = :balance
+    hm = heatmap!(ax, 1e-3x, 1e-3y, q_f;
+                rasterize = true, colormap = colormap, colorrange = crange_static)
+    Colorbar(fig[1, 2], hm, label=L"q_f")             # if you want colorbar
+    save(filesave * fileparam * "_q_f.png", fig; px_per_unit=4)
+    println("Saved figure of filtered q")
+
+    # Plot of horizontalq_f field
+    fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect(), 
+        title=fileparam * ": Filtered horizontal q term (min $(@sprintf("%.1e", minimum(horizontalq_f))), max $(@sprintf("%.1e", maximum(horizontalq_f))))")
+    colormap = :balance
+    hm = heatmap!(ax, 1e-3x, 1e-3y, horizontalq_f;
+                rasterize = true, colormap = colormap, colorrange = crange_static)
+    Colorbar(fig[1, 2], hm, label=L"horizontal q")             # if you want colorbar
+    save(filesave * fileparam * "_horizontalq_f.png", fig; px_per_unit=4)
+    println("Saved figure of filtered horizontal q term")
+
+    # Plot of verticalq_f field
+    fig = Figure(size = (700, 640))     # if you want colorbar
+    ax = Axis(fig[1, 1]; aspect = DataAspect(), 
+        title=fileparam * ": Filtered vertical q term (min $(@sprintf("%.1e", minimum(verticalq_f))), max $(@sprintf("%.1e", maximum(verticalq_f))))")
+    colormap = :balance
+    hm = heatmap!(ax, 1e-3x, 1e-3y, verticalq_f;
+                rasterize = true, colormap = colormap, colorrange = crange_static)
+    Colorbar(fig[1, 2], hm, label=L"vertical q")             # if you want colorbar
+    save(filesave * fileparam * "_verticalq_f.png", fig; px_per_unit=4)
+    println("Saved figure of filtered vertical q term")
+end
+
+function plot_spectra_colormag(filesave, fileparam, labels, K, S_quf, bands_quf, S_qf, bands_qf)
+    # --- Compute frequencies and plot spectra for unfiltered q --- 
+
+    freqs_quf = collect(S_quf.freq)
+    global S0 = S_quf
+    spec_normalized_quf = Real.(S_quf.spec ./ S0.spec[1])
+
+    band_max_quf = [maximum(abs, bands_quf[label]) for label in labels]
+    color_vals_quf = bandmax_color_vals(freqs_quf, band_max_quf, K)
+
+    crange = extrema(color_vals_quf)        # Lock both lines to q_uf's color limits
+
+    # Plot spectra colored by max(|q_uf|) in each band regime
+    fig = Figure(size = (600, 500))
+    axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",
+                ylabel = L"E_{q}(k)/E_{q} (k_{min})",
+                xscale = log10, yscale = log10,
+                limits = ((10^-4.5, 10^0.5), (1e-17,1e3)))
+    ax = Axis(fig[1, 1]; title=L"q_{uf}, z=-2.8125 m", axis_kwargs1...)
+
+    lp = lines!(ax, freqs_quf, spec_normalized_quf, color = color_vals_quf,
+                colormap = :amp, colorrange = crange, linewidth = 2)
+
+    Colorbar(fig[1,2], lp, label = L"\max {|q|} \text{ in band}")
+    xlims!(ax, (10^-4.5, 10^0.5))
+    vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
+    save(filesave * fileparam * "_spectracolor_quf.png", fig)
+    println("Saved figure of q_uf spectra colored by frontal sharpness")
+
+    # Free up memory
+    S_quf, freqs_quf, spec_normalized_quf, bands_quf, band_max_quf, color_vals_quf = ntuple(i -> nothing, 6)
+    GC.gc()                                                 # force the garbage collector to run immediately
+
+    # --- Compute frequencies and plot spectra for filtered q --- 
+
+    freqs_qf = collect(S_qf.freq)
+    spec_normalized_qf = Real.(S_qf.spec ./ S0.spec[1])
+
+    band_max_qf  = [maximum(abs, bands_qf[label])  for label in labels]
+    color_vals_qf  = bandmax_color_vals(freqs_qf,  band_max_qf,  K)
+
+    # Plot spectra colored by max(|q_f|) in each band regime
+    fig = Figure(size = (600, 500))
+    axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",
+                ylabel = L"E_{q}(k)/E_{q} (k_{min})",
+                xscale = log10, yscale = log10,
+                limits = ((10^-4.5, 10^0.5), (1e-17,1e3)))
+    ax = Axis(fig[1, 1]; title=L"q_{f}, z=-2.8125 m", axis_kwargs1...)
+
+    lp2 = lines!(ax, freqs_qf, spec_normalized_qf, color = color_vals_qf,
+                colormap = :amp, colorrange = crange, linewidth = 2, linestyle = :dash)
+
+    Colorbar(fig[1,2], lp, label = L"\max {|q|} \text{ in band}")
+    xlims!(ax, (10^-4.5, 10^0.5))
+    vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
+    save(filesave * fileparam * "_spectracolor_qf.png", fig)
+    println("Saved figure of q_f spectra colored by frontal sharpness")
+
+    # Free up memory
+    S_qf, freqs_qf, spec_normalized_qf, bands_qf, band_max_qf, color_vals_qf = ntuple(i -> nothing, 6)
+    GC.gc()                                                 # force the garbage collector to run immediately
+end
+
 ### -------------------------------------------------------------------------
 ## Plot the heatmap plots of each subdomain tile
 
@@ -396,180 +585,45 @@ println("Iteration: $(iteration)")
 # println("--- Subdomain $(i) ---")
 # fileparam = "subdomain" * string(i)
 # output_filename = filehead * fileparam * "_iter$(iteration).jld2"
+# snapshot = load_subdomain_snapshot(output_filename)
 
 # Region A/B/C
-region = "C"
+region = "A"
 println("--- Region $(region) ---")
 fileparam = "region" * string(region)
 
 # ---
 
-# # 2. Load the snapshot
-# output_filename = filehead * "subdomain_T_" * fileparam * "_iter$(iteration).jld2"      # Load T field
-# snapshot = load_subdomain_snapshot(output_filename)
-
-# ---
-
-# # 3. Compute filtered potential vorticity (for 10x10km tiles where snapshot contains [:T,:u,:v,:w])
+# # 2a. Compute filtered potential vorticity (for 10x10km tiles where snapshot contains [:T,:u,:v,:w])
 # plot_filteredPV(snapshot, fileparam)
 
-# --- Cache of computed PV variables (x, y, horizontalq/verticalq/q, filtered & unfiltered) ---
-pv_cache_file = filesave * fileparam * "_iter$(iteration)_pv.jld2"
+# 2b. Load or compute PV variables 
 
 filter_scale = 300                                      # meters, bound between submesoscale and BLT
 
+# Cache of computed PV variables (x, y, horizontalq/verticalq/q, filtered & unfiltered)
+pv_cache_file = filesave * fileparam * "_iter$(iteration)_pv.jld2"
 # Load PV cache file if it exists, or compute PV
 x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f = compute_load_pv(
             pv_cache_file, filehead, fileparam, iteration, dx, dy, dz, α, g, f, filter_scale)
+# --- 
 
-# Plot of q_uf field
-fig = Figure(size = (700, 640))     # if you want colorbar
-ax = Axis(fig[1, 1]; aspect = DataAspect(),
-    title=fileparam * ": Unfiltered Ertel PV (min $(@sprintf("%.1e", minimum(q_uf))), max $(@sprintf("%.1e", maximum(q_uf))))")
-colormap = :balance
-hm = heatmap!(ax, 1e-3x, 1e-3y, q_uf;
-            rasterize = true, colormap = colormap, colorrange = (-5e-9, 5e-9))
-Colorbar(fig[1, 2], hm, label=L"q_{uf}")             # if you want colorbar
-save(filesave * fileparam * "_q_uf.png", fig; px_per_unit=4)
-println("Saved figure of unfiltered q")
+# 3. Compute spectra for unfiltered and filtered q
 
-# Plot of horizontalq_uf field
-fig = Figure(size = (700, 640))     # if you want colorbar
-ax = Axis(fig[1, 1]; aspect = DataAspect(),
-    title=fileparam * ": Unfiltered horizontal q term (min $(@sprintf("%.1e", minimum(horizontalq_uf))), max $(@sprintf("%.1e", maximum(horizontalq_uf))))")
-colormap = :balance
-hm = heatmap!(ax, 1e-3x, 1e-3y, horizontalq_uf;
-            rasterize = true, colormap = colormap, colorrange = (-5e-9, 5e-9))
-Colorbar(fig[1, 2], hm, label=L"horizontal q")             # if you want colorbar
-save(filesave * fileparam * "_horizontalq_uf.png", fig; px_per_unit=4)
-println("Saved figure of unfiltered horizontal q term")
+# Define cutoffs
+cutoffs = 10 .^ range(4, 0, length=100)                 # 100 log-spaced values from 1e4 down to 1e0
+K = 2π ./ cutoffs                                       # band edge wavenumbers, increasing
+labels = ["κ ≤ 2π/$(cutoffs[1])",
+        ["2π/$(cutoffs[n]) < κ ≤ 2π/$(cutoffs[n+1])" for n in 1:length(cutoffs)-1]...,
+        "κ > 2π/$(cutoffs[end])"]
 
-# Plot of verticalq_uf field
-fig = Figure(size = (700, 640))     # if you want colorbar
-ax = Axis(fig[1, 1]; aspect = DataAspect(),
-    title=fileparam * ": Unfiltered vertical q term (min $(@sprintf("%.1e", minimum(verticalq_uf))), max $(@sprintf("%.1e", maximum(verticalq_uf))))")
-colormap = :balance
-hm = heatmap!(ax, 1e-3x, 1e-3y, verticalq_uf;
-            rasterize = true, colormap = colormap, colorrange = (-5e-9, 5e-9))
-Colorbar(fig[1, 2], hm, label=L"vertical q")             # if you want colorbar
-save(filesave * fileparam * "_verticalq_uf.png", fig; px_per_unit=4)
-println("Saved figure of unfiltered vertical q term")
+# Cache of computed PV spectra/bands (filtered & unfiltered)
+pvspectra_cache_file = filesave * fileparam * "_iter$(iteration)_pvspectra.jld2"
+# Load PV spectra cache file if it exists, or compute PV spectra
+S_quf, bands_quf, S_qf, bands_qf, S_horquf, S_verquf, S_horqf, S_verqf = compute_load_pvspectra(
+                    pvspectra_cache_file, labels, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f)
 
-# Plot of q_f field
-fig = Figure(size = (700, 640))     # if you want colorbar
-ax = Axis(fig[1, 1]; aspect = DataAspect(), 
-    title=fileparam * ": Filtered Ertel PV (min $(@sprintf("%.1e", minimum(q_f))), max $(@sprintf("%.1e", maximum(q_f))))")
-colormap = :balance
-hm = heatmap!(ax, 1e-3x, 1e-3y, q_f;
-            rasterize = true, colormap = colormap, colorrange = (-5e-9, 5e-9))
-Colorbar(fig[1, 2], hm, label=L"q_f")             # if you want colorbar
-save(filesave * fileparam * "_q_f.png", fig; px_per_unit=4)
-println("Saved figure of filtered q")
+# --- 
 
-# Plot of horizontalq_f field
-fig = Figure(size = (700, 640))     # if you want colorbar
-ax = Axis(fig[1, 1]; aspect = DataAspect(), 
-    title=fileparam * ": Filtered horizontal q term (min $(@sprintf("%.1e", minimum(horizontalq_f))), max $(@sprintf("%.1e", maximum(horizontalq_f))))")
-colormap = :balance
-hm = heatmap!(ax, 1e-3x, 1e-3y, horizontalq_f;
-            rasterize = true, colormap = colormap, colorrange = (-5e-9, 5e-9))
-Colorbar(fig[1, 2], hm, label=L"horizontal q")             # if you want colorbar
-save(filesave * fileparam * "_horizontalq_f.png", fig; px_per_unit=4)
-println("Saved figure of filtered horizontal q term")
-
-# Plot of verticalq_f field
-fig = Figure(size = (700, 640))     # if you want colorbar
-ax = Axis(fig[1, 1]; aspect = DataAspect(), 
-    title=fileparam * ": Filtered vertical q term (min $(@sprintf("%.1e", minimum(verticalq_f))), max $(@sprintf("%.1e", maximum(verticalq_f))))")
-colormap = :balance
-hm = heatmap!(ax, 1e-3x, 1e-3y, verticalq_f;
-            rasterize = true, colormap = colormap, colorrange = (-5e-9, 5e-9))
-Colorbar(fig[1, 2], hm, label=L"vertical q")             # if you want colorbar
-save(filesave * fileparam * "_verticalq_f.png", fig; px_per_unit=4)
-println("Saved figure of filtered vertical q term")
-
-# # --- Compute and plot spectra for unfiltered q --- 
-
-# # Define cutoffs
-# cutoffs = 10 .^ range(4, 0, length=100)                 # 100 log-spaced values from 1e4 down to 1e0
-# K = 2π ./ cutoffs                                       # band edge wavenumbers, increasing
-# labels = ["κ ≤ 2π/$(cutoffs[1])",
-#         ["2π/$(cutoffs[n]) < κ ≤ 2π/$(cutoffs[n+1])" for n in 1:length(cutoffs)-1]...,
-#         "κ > 2π/$(cutoffs[end])"]
-
-# # --- Cache of computed PV spectra/bands (filtered & unfiltered) ---
-# pvspectra_cache_file = filesave * fileparam * "_iter$(iteration)_pvspectra.jld2"
-
-# if isfile(pvspectra_cache_file)
-#     println("Loading cached PV spectra variables from $pvspectra_cache_file...")
-#     S_quf, bands_quf, S_qf, bands_qf =
-#         load(pvspectra_cache_file, "S_quf", "bands_quf", "S_qf", "bands_qf")
-# else
-#     # Compute for band regimes for |q_uf|
-#     S_quf = isotropic_powerspectrum(q_uf, q_uf; Δx=dx, Δy=dy)
-#     bands_quf = bandpass_filter(q_uf, dx, dy, cutoffs)      # compute bands
-
-#     # Compute for band regimes for |q_f|
-#     S_qf = isotropic_powerspectrum(q_f, q_f; Δx=dx, Δy=dy)
-#     bands_qf = bandpass_filter(q_f, dx, dy, cutoffs)        # compute bands
-
-#     mkpath(filesave)
-#     jldsave(pvspectra_cache_file; S_quf, bands_quf, S_qf, bands_qf)
-#     println("Saved cached PV spectra variables to $pvspectra_cache_file")
-# end # if isfile(pvspectra_cache_file)
-
-# freqs_quf = collect(S_quf.freq)
-# global S0 = S_quf
-# spec_normalized_quf = Real.(S_quf.spec ./ S0.spec[1])
-
-# band_max_quf = [maximum(abs, bands_quf[label]) for label in labels]
-# color_vals_quf = bandmax_color_vals(freqs_quf, band_max_quf, K)
-
-# crange = extrema(color_vals_quf)        # Lock both lines to q_uf's color limits
-
-# # Plot spectra colored by max(|q_uf|,|q_f|) in each band regime
-# # Fig 1: in one plot 
-# fig = Figure(size = (600, 500))
-# axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",
-#             ylabel = L"E_{q}(k)/E_{q} (k_{min})",
-#             xscale = log10, yscale = log10,
-#             limits = ((10^-4.5, 10^0.5), (1e-17,1e3)))
-# ax = Axis(fig[1, 1]; title=L"q_{uf}, z=-8.4375 m", axis_kwargs1...)
-
-# lp = lines!(ax, freqs_quf, spec_normalized_quf, color = color_vals_quf,
-#             colormap = :amp, colorrange = crange, linewidth = 2)
-
-# Colorbar(fig[1,2], lp, label = L"\max {|q|} \text{ in band}")
-# xlims!(ax, (10^-4.5, 10^0.5))
-# vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
-# save(filesave * fileparam * "_spectracolor_quf.png", fig)
-# println("Saved figure of q_uf spectra colored by frontal sharpness")
-
-# # Free up memory
-# S_quf, freqs_quf, spec_normalized_quf, bands_quf, band_max_quf, color_vals_quf = ntuple(i -> nothing, 6)
-# GC.gc()                                                 # force the garbage collector to run immediately
-
-# # --- Compute spectra for unfiltered q and filtered q ---
-
-# freqs_qf = collect(S_qf.freq)
-# spec_normalized_qf = Real.(S_qf.spec ./ S0.spec[1])
-
-# band_max_qf  = [maximum(abs, bands_qf[label])  for label in labels]
-# color_vals_qf  = bandmax_color_vals(freqs_qf,  band_max_qf,  K)
-
-# # Fig 2
-# fig = Figure(size = (600, 500))
-# axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",
-#             ylabel = L"E_{q}(k)/E_{q} (k_{min})",
-#             xscale = log10, yscale = log10,
-#             limits = ((10^-4.5, 10^0.5), (1e-17,1e3)))
-# ax = Axis(fig[1, 1]; title=L"q_{f}, z=-8.4375 m", axis_kwargs1...)
-
-# lp2 = lines!(ax, freqs_qf, spec_normalized_qf, color = color_vals_qf,
-#             colormap = :amp, colorrange = crange, linewidth = 2, linestyle = :dash)
-
-# Colorbar(fig[1,2], lp, label = L"\max {|q|} \text{ in band}")
-# xlims!(ax, (10^-4.5, 10^0.5))
-# vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
-# save(filesave * fileparam * "_spectracolor_qf.png", fig)
-# println("Saved figure of q_f spectra colored by frontal sharpness")
+# 4a. Color spectra plot according to max |q_uf| or max |q_f| by evaluating 100 band regimes
+plot_spectra_colormag(filesave, fileparam, labels, K, S_quf, bands_quf, S_qf, bands_qf)
