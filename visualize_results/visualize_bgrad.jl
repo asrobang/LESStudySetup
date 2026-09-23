@@ -15,7 +15,7 @@ using JLD2 #, CUDA
 
 # --- Set file directories ---
 filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/" 
-filesave = "/home/asrobang/orcd/scratch/figures/20260913_regionABC_figs/"
+filesave = "/home/asrobang/orcd/scratch/figures/20260922_regionABC_spectra/"
 
 # --- Set parameters ---
 set_value!(; Δh = 4.8828125)    # horizontal spacing
@@ -155,14 +155,9 @@ function bandpass_filter(field, dx, dy, cutoffs)
     return results
 end
 
-function compute_spectra(field, dbdx, dbdy, dbdz, dx, dy)
-    # Compute spectra
-    S_bgradmag = isotropic_powerspectrum(field, field; Δx=dx, Δy=dy)
-    S_dbdx = isotropic_powerspectrum(dbdx, dbdz; Δx=dx, Δy=dy)
-    S_dbdy = isotropic_powerspectrum(dbdy, dbdz; Δx=dx, Δy=dy)
-    S_dbdz = isotropic_powerspectrum(dbdz, dbdz; Δx=dx, Δy=dy)
-
-    return S_bgradmag, S_dbdx, S_dbdy, S_dbdz
+function compute_spectra(fields...; dx, dy)
+    # Compute the isotropic auto-spectrum of each input field, returned in the same order
+    return map(A -> isotropic_powerspectrum(A, A; Δx=dx, Δy=dy), fields)
 end
 
 function compute_load_bgrad(bgrad_cache_file,output_filename,α,g,dx,dy,dz)
@@ -205,7 +200,7 @@ end
 function plot_fieldspectra(filesave, fileparam, field, dbdz, dx, dy, x, y)
     # 4. Plot the |nabla b_h| and db/dz fields and spectra
 
-    S_bgradmag, _, _, S_dbdz = compute_spectra(field, dbdz, dx, dy)
+    S_bgradmag, S_dbdz = compute_spectra(field, dbdz; dx, dy)
 
     # Plot of |nabla b_h| field
     fig = Figure(size = (700, 640))     # if you want colorbar
@@ -341,7 +336,7 @@ function plot_spectra_colormag(filesave, fileparam, field, dbdz, dx, dy, x, y; c
     println("6. Color spectra plot according to max bgradmag or max |db/dz| by evaluating 100 band regimes")
 
     println("Computing spectra...")
-    S_bgradmag, _, _, S_dbdz = compute_spectra(field, dbdz, dx, dy)
+    S_bgradmag, S_dbdz = compute_spectra(field, dbdz; dx, dy)
 
     # Compute for 100 band regimes for |nabla b_h|
     freqs = collect(S_bgradmag.freq)
@@ -440,28 +435,32 @@ function plot_spectra_colormag(filesave, fileparam, field, dbdz, dx, dy, x, y; c
     println("Saved figure of db/dz spectra colored by frontal sharpness")
 end
 
-function plot_spectracomponents(filesave, fileparam, dbdx, dbdy, dbdz, dx, dy, x, y)
+function plot_spectracomponents(filesave, fileparam, dbdx, dbdy, dbdz, dx, dy, x, y; norm_val=nothing)
     # 7. Plot the spectra of buoyancy gradient split into their 3 components (dbdx, dbdy, dbdz),
     #    combined in one figure, all normalized by the largest-scale (k_min) power of db/dx
+    println("7. Plot the spectra of buoyancy gradient split into their 3 components (dbdx, dbdy, dbdz)")
 
-    norm_val = dbdx.spec[1]  # largest-scale (k_min) reading of the db/dx spectrum
+    println("Computing spectra...")
+    S_dbdx, S_dbdy, S_dbdz = compute_spectra(dbdx, dbdy, dbdz; dx, dy)
+
+    norm_val = isnothing(norm_val) ? S_dbdx.spec[1] : norm_val  # passed-in normalization, else this region's own k_min reading of the db/dx spectrum
 
     fig = Figure(size = (600, 500))
     axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",
                 ylabel = L"E(k)/E_{db/dx}(k_{min})",     # normalized wrt db/dx at k_min
                 xscale = log10, yscale = log10,
-                limits = ((10^-4.5, 10^0.5), (1e-12, 1e3)))
+                limits = ((10^-4.5, 10^0.5), (1e-3, 1e6)))
     ax = Axis(fig[1, 1]; title="z=-2.8125 m", axis_kwargs1...)
 
     vspan!(ax, 2π/10^4, 10^0.5; color = (:lightblue, 0.3))
 
-    lines!(ax, dbdx.freq, Real.(dbdx.spec ./ norm_val); label = L"\partial b/\partial x", color = :red)
-    lines!(ax, dbdy.freq, Real.(dbdy.spec ./ norm_val); label = L"\partial b/\partial y", color = :blue)
-    lines!(ax, dbdz.freq, Real.(dbdz.spec ./ norm_val); label = L"\partial b/\partial z", color = :green)
+    lines!(ax, S_dbdx.freq, Real.(S_dbdx.spec ./ norm_val); label = L"\partial b/\partial x", color = :red)
+    lines!(ax, S_dbdy.freq, Real.(S_dbdy.spec ./ norm_val); label = L"\partial b/\partial y", color = :blue)
+    lines!(ax, S_dbdz.freq, Real.(S_dbdz.spec ./ norm_val); label = L"\partial b/\partial z", color = :green)
 
     # k^(2/3) and k^(1/3) reference slopes (tune amplitudes A23, A13 by hand)
     kref = 10 .^ range(-4.5, 0.5, length = 100)
-    A23, A13 = 1e-3, 1e-3
+    A23, A13 = 1e3, 1e1
     lines!(ax, kref, A23 .* kref .^ (2/3); linestyle = :dash, color = :grey, label = L"k^{2/3}")
     lines!(ax, kref, A13 .* kref .^ (1/3); linestyle = :dash, color = :black, label = L"k^{1/3}")
 
@@ -499,6 +498,22 @@ bgrad_cache_file = filesave * fileparam * "_iter$(iteration)_bgrad.jld2"
 # Load buoyancy gradient cache file if it exists, or compute it
 x, y, field, dbdx, dbdy, dbdz = compute_load_bgrad(bgrad_cache_file,output_filename,α,g,dx,dy,dz)
 
+# Normalization: k_min reading of region C's db/dx spectrum, so all regions share one scale
+norm_region = "C"
+norm_val = nothing      # region C itself: plot_spectracomponents uses its own db/dx spectrum
+if region != norm_region
+    norm_fileparam = "region" * norm_region
+    norm_cache_file = filesave * norm_fileparam * "_iter$(iteration)_bgrad.jld2"
+    norm_output_filename = filehead * "subdomain_T_" * norm_fileparam * "_iter$(iteration).jld2"
+    _, _, _, dbdx_norm, _, _ = compute_load_bgrad(norm_cache_file, norm_output_filename, α, g, dx, dy, dz)
+    S_dbdx_norm, = compute_spectra(dbdx_norm; dx, dy)
+    norm_val = S_dbdx_norm.spec[1]
+
+    dbdx_norm = nothing     # free the variable
+    GC.gc()                 # force the garbage collector to run immediately
+end
+println("Normalizing by region $(norm_region) db/dx spectrum at k_min")
+
 # ---
 
 # # 4. Plot the |nabla b_h| and db/dz fields and spectra
@@ -511,6 +526,6 @@ x, y, field, dbdx, dbdy, dbdz = compute_load_bgrad(bgrad_cache_file,output_filen
 # plot_spectra_colormag(filesave, fileparam, field, dbdz, dx, dy, x, y; crange_static=(0, 3.5e-5))
 
 # 7. Plot the spectra of buoyancy gradient split into their 3 components (dbdx, dbdy, dbdz)
-plot_spectracomponents(filesave, fileparam, field, dbdz, dx, dy, x, y)
+plot_spectracomponents(filesave, fileparam, dbdx, dbdy, dbdz, dx, dy, x, y; norm_val)
 
 # ---
