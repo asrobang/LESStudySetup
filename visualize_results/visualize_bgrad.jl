@@ -449,7 +449,7 @@ function plot_spectracomponents(filesave, fileparam, dbdx, dbdy, dbdz, dx, dy, x
     axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",
                 ylabel = L"E(k)/E_{db/dx}(k_{min})",     # normalized wrt db/dx at k_min
                 xscale = log10, yscale = log10,
-                limits = ((10^-4.5, 10^0.5), (1e-3, 1e6)))
+                limits = ((10^-4.5, 10^0.5), (1e-2, 1e6)))
     ax = Axis(fig[1, 1]; title="z=-2.8125 m", axis_kwargs1...)
 
     vspan!(ax, 2π/10^4, 10^0.5; color = (:lightblue, 0.3))
