@@ -6,18 +6,19 @@ using Oceananigans: compute!
 using Oceananigans.Grids: xnodes, ynodes, znodes
 using LESStudySetup.Diagnostics
 using LESStudySetup.Diagnostics: load_snapshots, load_subdomain_snapshot, isotropic_powerspectrum, δ
+using JLD2
 set_theme!(Theme(fontsize = 12))
 
 # =============================================================================
 # --- File directories ---
 # =============================================================================
-hy_filehead  = "./LESStudySetup/"
+hy_filehead  = "/orcd/data/abodner/002/shared_datasets/hyles_output/"
 hy_filename  = hy_filehead * "hydrostatic_snapshots_hydrostatic_twin_simulation.jld2"
 hy_metadata  = hy_filehead * "experiment_hydrostatic_twin_simulation_metadata.jld2"
 
 nhy_filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/"
 
-filesave = "/home/asrobang/orcd/scratch/figures/20260811_spectra/"
+filesave = "/home/asrobang/orcd/scratch/figures/20260922_regionABC_spectra/"
 
 # =============================================================================
 # --- Shared physical parameters ---
@@ -40,16 +41,41 @@ dz = 1.125                             # [m] vertical grid size (both sims)
 hy_klev  = 223       # z = -8.4375 m in the hydrostatic full-domain grid
 nhy_klev = 65        # z = -8.4375 m in the nonhydrostatic subdomain grid
 
+# We want close to the surface, so z ~ -2m
+nhy_klev = 70        # z = -2.8125 m in the nonhydrostatic subdomain grid
+
 # --- Slice of the hydrostatic full domain matching nhy subdomain 97 ---
 # (nhy subdomain 97 is a 10km x 10km tile; this xrange wraps the periodic x-boundary)
-subdomain = 97
+# subdomain = 97
+# fileparam = "subdomain" * string(subdomain)
 hy_xrange = vcat(583:640, 1:7)
 hy_yrange = 391:455
 
+fileparam = "regionC"
+
 # --- Day <-> snapshot_number (hy) / iteration (nhy) correspondence ---
-days              = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5]
+# days              = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5]
+days              = [5.5, 6.5, 7.5]
 hy_snapshot_nums  = [9, 25, 41, 57, 73, 89, 105, 121]
-nhy_iterations    = [22865, 42238, 62484, 82586, 103348, 123463, 143293, 164410]
+# nhy_iterations    = [22865, 42238, 62484, 82586, 103348, 123463, 143293, 164410]
+nhy_iterations    = [123463, 143293, 164410]
+
+# --- Normalization reference: nhy u spectrum, k_min bin, on norm_day in norm_region.
+#     Fixed across runs, so every variable and every region shares one factor. ---
+norm_day       = 7.5
+norm_iteration = 164410      # nhy iteration for day 7.5 (see full day<->iteration table above)
+norm_region    = "regionC"   # reference region, independent of fileparam
+
+# --- Depth of nhy_klev, read from the nhy output grid (cf. grid.jl) ---
+function nhy_depth(klev; iteration = nhy_iterations[1])
+    fname = contains(fileparam, "region") ?
+        nhy_filehead * "subdomain_T_" * fileparam * "_iter$(iteration).jld2" :
+        nhy_filehead * fileparam * "_iter$(iteration).jld2"
+    grid = jldopen(file -> file["grid"], fname, "r")      # grid only, no field data
+    return znodes(grid, Center())[klev]             # cell-center depth; matches T/u/v and the w average
+end
+depth = nhy_depth(nhy_klev)
+println("nhy_klev = $(nhy_klev) → z = $(depth) m")
 
 day_labels = ["Day $(d)" for d in days]
 
@@ -78,28 +104,63 @@ function hyspectrum_uvwT(snapshots, snapshot_number, klev, xrange, yrange, dx, d
 end
 
 # =============================================================================
+# --- Nonhydrostatic spectrum of ONE variable from a region's per-variable file
+#     (subdomain_<var>_<region>_iter<iteration>.jld2) ---
+# =============================================================================
+function nhy_region_spectrum(var::Symbol, iteration, region, klev, dx, dy)
+    output_filename = nhy_filehead * "subdomain_$(var)_" * region * "_iter$(iteration).jld2"
+    snapshot = load_subdomain_snapshot(output_filename)
+    field = snapshot[var]
+    if var == :w
+        # w at cell faces in z: interpolate between neighboring faces to get depth of cell center
+        slice = (interior(field, :, :, klev) + interior(field, :, :, klev+1)) / 2
+    else
+        slice = interior(field, :, :, klev)
+    end
+    S = isotropic_powerspectrum(slice, slice; Δx=dx, Δy=dy)
+    println("Freeing large variables...")
+    field = nothing
+    snapshot = nothing      # free the variable
+    GC.gc()                 # force the garbage collector to run immediately
+    return S
+end
+
+# =============================================================================
 # --- Nonhydrostatic spectra (subdomain tile snapshots) ---
 # =============================================================================
-function nhyspectrum_uvwT(iteration, nday, subdomain, klev, dx, dy)
-    println("Reading nhy iteration $(iteration) on day $(nday), subdomain $(subdomain)...")
+function nhyspectrum_uvwT(iteration, nday, fileparam, klev, dx, dy)
+    println("Reading nhy iteration $(iteration) on day $(nday), $(fileparam)...")
     t0 = now()
 
-    fileparam = "subdomain" * string(subdomain)
-    output_filename = nhy_filehead * fileparam * "_iter$(iteration).jld2"
-    snapshot = load_subdomain_snapshot(output_filename)
+    # Distinguish between regions and 10kmx10km tiles
+    if contains(fileparam, "region")
+        St, Su, Sv, Sw = (nhy_region_spectrum(var, iteration, fileparam, klev, dx, dy) for var in (:T, :u, :v, :w))
+    else
+        output_filename = nhy_filehead * fileparam * "_iter$(iteration).jld2"
 
-    T = snapshot[:T]
-    u = snapshot[:u]
-    v = snapshot[:v]
-    w = snapshot[:w]
+        # 3. Load the snapshot
+        snapshot = load_subdomain_snapshot(output_filename)
 
-    println("Loading fields wall time: $((now() - t0).value/1e3) seconds.")
+        T = snapshot[:T]
+        u = snapshot[:u]
+        v = snapshot[:v]
+        w = snapshot[:w]
 
-    Su = isotropic_powerspectrum(interior(u, :, :, klev), interior(u, :, :, klev); Δx=dx, Δy=dy)
-    Sv = isotropic_powerspectrum(interior(v, :, :, klev), interior(v, :, :, klev); Δx=dx, Δy=dy)
-    wk = (interior(w, :, :, klev) + interior(w, :, :, klev+1)) / 2
-    Sw = isotropic_powerspectrum(wk, wk; Δx=dx, Δy=dy)
-    St = isotropic_powerspectrum(interior(T, :, :, klev), interior(T, :, :, klev); Δx=dx, Δy=dy)
+        println("Loading fields wall time: $((now() - t0).value/1e3) seconds.")
+
+        # Coordinate arrays
+        xu, yu, zu = nodes(u)       # u at cell faces in x
+        xv, yv, zv = nodes(v)       # v at cell faces in y
+        xw, yw, zw = nodes(w)       # w at cell faces in z
+        xT, yT, zT = nodes(T)       # T at cell centers 
+
+        # Compute the auto-spectrum (co-spectrum of field with itself) of T, u, v, w 
+        Su = isotropic_powerspectrum(interior(u, :, :, klev), interior(u, :, :, klev); Δx=dx, Δy=dy)
+        Sv = isotropic_powerspectrum(interior(v, :, :, klev), interior(v, :, :, klev); Δx=dx, Δy=dy)
+        wk = (interior(w, :, :, klev)+interior(w, :, :, klev+1))/2      # interpolates between neighboring cells to get depth of cell center
+        Sw = isotropic_powerspectrum(wk, wk; Δx=dx, Δy=dy)
+        St = isotropic_powerspectrum(interior(T, :, :, klev), interior(T, :, :, klev); Δx=dx, Δy=dy)
+    end
 
     return St, Su, Sv, Sw
 end
@@ -124,7 +185,7 @@ end
 #         set_value!(; Δh = nhy_dx)
 #         St, Su, Sv, Sw = ntuple(_ -> Vector{Any}(undef, length(days)), 4)
 #         for (i, iter) in enumerate(nhy_iterations)
-#             St[i], Su[i], Sv[i], Sw[i] = nhyspectrum_uvwT(iter, days[i], subdomain, nhy_klev, nhy_dx, nhy_dy)
+#             St[i], Su[i], Sv[i], Sw[i] = nhyspectrum_uvwT(iter, days[i], fileparam, nhy_klev, nhy_dx, nhy_dy)
 #         end
 #         return (; St, Su, Sv, Sw)
 
@@ -138,15 +199,59 @@ end
 #     spectra_uvwT(...) calls within the same Julia session. ---
 # =============================================================================
 const SPECTRA_CACHE = Dict{String, NamedTuple}()
- 
+
+# =============================================================================
+# --- On-disk cache of the full St/Su/Sv/Sw spectra vectors (all days), so a
+#     fresh Julia session can reload previously-computed spectra evolution
+#     instead of recomputing it from raw simulation snapshots. ---
+# =============================================================================
+spectra_cache_file(sim::String) = filesave * "$(sim)_spectra_evol_$(fileparam)_k$(sim == "hy" ? hy_klev : nhy_klev).jld2"
+
+function save_spectra_cache(sim::String, data::NamedTuple)
+    mkpath(filesave)
+    file = spectra_cache_file(sim)
+    to_plain(S) = [(spec = s.spec, freq = s.freq) for s in S]
+    St, Su, Sv, Sw = to_plain(data.St), to_plain(data.Su), to_plain(data.Sv), to_plain(data.Sw)
+    println("Caching $sim spectra evolution to $file...")
+    if sim == "nhy"
+        jldsave(file; St, Su, Sv, Sw, iterations = nhy_iterations)
+    else
+        jldsave(file; St, Su, Sv, Sw)
+    end
+end
+
+# Cached nhy spectra are only reused if they were computed for the current nhy_iterations
+function spectra_cache_is_current(sim::String)
+    sim == "nhy" || return true          # hy behavior unchanged
+    stored = jldopen(file -> haskey(file, "iterations") ? file["iterations"] : nothing,
+                     spectra_cache_file(sim), "r")
+    stored == nhy_iterations && return true
+    println("Cached $sim spectra are stale (iterations $(stored) ≠ $(nhy_iterations)), recomputing...")
+    return false
+end
+
+function load_spectra_cache(sim::String)
+    file = spectra_cache_file(sim)
+    println("Loading cached $sim spectra evolution from $file...")
+    St, Su, Sv, Sw = load(file, "St", "Su", "Sv", "Sw")
+    return (; St, Su, Sv, Sw)
+end
+
 function compute_spectra_evol(sim::String; force_recompute=false)
     if !force_recompute && haskey(SPECTRA_CACHE, sim)
         println("Using cached $sim spectra (already computed this session)...")
         return SPECTRA_CACHE[sim]
     end
- 
+
+    if !force_recompute && isfile(spectra_cache_file(sim)) && spectra_cache_is_current(sim)
+        result = load_spectra_cache(sim)
+        SPECTRA_CACHE[sim] = result
+        return result
+    end
+
     result = _compute_spectra_evol_uncached(sim)
     SPECTRA_CACHE[sim] = result
+    save_spectra_cache(sim, result)
     return result
 end
  
@@ -166,7 +271,7 @@ function _compute_spectra_evol_uncached(sim::String)
         set_value!(; Δh = nhy_dx)
         St, Su, Sv, Sw = ntuple(_ -> Vector{Any}(undef, length(days)), 4)
         for (i, iter) in enumerate(nhy_iterations)
-            St[i], Su[i], Sv[i], Sw[i] = nhyspectrum_uvwT(iter, days[i], subdomain, nhy_klev, nhy_dx, nhy_dy)
+            St[i], Su[i], Sv[i], Sw[i] = nhyspectrum_uvwT(iter, days[i], fileparam, nhy_klev, nhy_dx, nhy_dy)
         end
         return (; St, Su, Sv, Sw)
  
@@ -176,40 +281,34 @@ function _compute_spectra_evol_uncached(sim::String)
 end
  
 # =============================================================================
-# --- Cache the nhy normalization factors (avoids recomputing full nhy spectra
-#     every time you just want to plot "hy") ---
+# --- Single normalization factor shared by T, u, v, w and by every region:
+#     k_min bin of the nhy u spectrum on norm_day in norm_region. Cached on disk
+#     under norm_region (not fileparam) so all region runs reuse the same value. ---
 # =============================================================================
-using JLD2
- 
-norm_cache_file = filesave * "nhy_norm_reference_subdomain$(subdomain).jld2"
- 
-function get_nhy_norm_factors(; force_recompute=false)
+norm_cache_file = filesave * "nhy_norm_reference_u_$(norm_region)_k$(nhy_klev).jld2"
+
+function get_norm_factor(; force_recompute=false)
     if !force_recompute && isfile(norm_cache_file)
-        println("Loading cached nhy normalization factors from $norm_cache_file...")
-        return load(norm_cache_file, "norm_factors")
+        stored = jldopen(norm_cache_file, "r") do file
+            all(haskey(file, key) for key in ("norm_region", "norm_iteration", "nhy_klev")) ?
+                (file["norm_region"], file["norm_iteration"], file["nhy_klev"]) : nothing
+        end
+        if stored == (norm_region, norm_iteration, nhy_klev)
+            norm_factor = load(norm_cache_file, "norm_factor")
+            println("Loaded cached norm factor = $(norm_factor) from $norm_cache_file")
+            return norm_factor
+        end
+        println("Cached norm factor is stale ($(stored) ≠ $((norm_region, norm_iteration, nhy_klev))), recomputing...")
     end
- 
-    println("Computing nhy normalization factors (will cache to $norm_cache_file)...")
-    nhy_data = compute_spectra_evol("nhy")
-    norm_factors = Dict(
-        :St => nhy_data.St[end].spec[1],
-        :Su => nhy_data.Su[end].spec[1],
-        :Sv => nhy_data.Sv[end].spec[1],
-        :Sw => nhy_data.Sw[end].spec[1],
-    )
-    # Also cache the freq axis for the k^(-5/3) reference line
-    freq_ref = nhy_data.Sv[1].freq
- 
+
+    println("Computing norm factor from nhy u, $(norm_region), iteration $(norm_iteration) (will cache to $norm_cache_file)...")
+    set_value!(; Δh = nhy_dx)
+    norm_factor = nhy_region_spectrum(:u, norm_iteration, norm_region, nhy_klev, nhy_dx, nhy_dy).spec[1]
+    println("norm factor = $(norm_factor)")
+
     mkpath(filesave)
-    jldsave(norm_cache_file; norm_factors, freq_ref)
-    return norm_factors
-end
- 
-function get_nhy_freq_ref()
-    if isfile(norm_cache_file)
-        return load(norm_cache_file, "freq_ref")
-    end
-    error("No cached freq_ref found — call get_nhy_norm_factors() first to populate the cache.")
+    jldsave(norm_cache_file; norm_factor, norm_region, norm_iteration, nhy_klev)
+    return norm_factor
 end
 
 # =============================================================================
@@ -218,32 +317,24 @@ end
 # =============================================================================
 function plot_spectra_evol(sim::String, field::Symbol, varname::String;
                             hy_data=nothing, nhy_data=nothing,
-                            zlabel="z=-8.4375 m")
+                            zlabel="z=$(depth) m")
 
     axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",
-                    ylabel = L"E_{%$varname}(k)/E_{%$varname} (k_{min},\text{day}=0.5)",
+                    ylabel = L"E_{%$varname}(k)/E_{u} (k_{min},\text{day}=%$(norm_day),\text{%$(norm_region)})",
                     xscale = log10, yscale = log10,
-                    limits = ((10^-3.5, 10^0.5), (1e-10, 1e2)))
+                    limits = ((10^-4.5, 10^0.5), (1e-12, 1e6)))
 
     fig = Figure(size = (600, 500))
     ax = Axis(fig[1, 1]; title = zlabel, axis_kwargs1...)
 
-    # Normalization reference is ALWAYS the nhy last-day spectrum, regardless
-    # of which sim(s) are being plotted. If nhy_data wasn't computed this run
-    # (e.g. sim == "hy"), fall back to the cached nhy normalization factor.
-    if nhy_data !== nothing
-        norm_spec1 = getfield(nhy_data, field)[end].spec[1]
-        freq_ref = getfield(nhy_data, field)[1].freq
-    else
-        norm_factors = get_nhy_norm_factors()
-        norm_spec1 = norm_factors[field]
-        freq_ref = get_nhy_freq_ref()
-    end
- 
-    # Draw reference k^(-5/3) line (freq axis taken from nhy day-0.5 spectrum,
-    # which is always available regardless of sim)
-    lines!(ax, freq_ref, 1e-8 .* freq_ref.^(-2), linestyle = :dash, color = :black)
-    lines!(ax, freq_ref, 1e-8 .* freq_ref.^(-5/3), linestyle = :dash, color = :gray)
+    # Same reference for every field, sim, and region (see get_norm_factor)
+    norm_spec1 = get_norm_factor()
+
+    # k^(-2) and k^(-5/3) reference slopes (tune amplitudes A23, A13 by hand)
+    kref = 10 .^ range(-4.5, 0.5, length = 100)
+    A23, A53 = 1e-9, 1e0
+    lines!(ax, kref, A23 .* kref .^ (-2); linestyle = :dash, color = :grey, label = L"k^{-2}")
+    lines!(ax, kref, A53 .* kref .^ (-5/3); linestyle = :dash, color = :black, label = L"k^{-5/3}")
     
     if sim in ("hy", "both") && hy_data !== nothing
         S = getfield(hy_data, field)
@@ -263,12 +354,12 @@ function plot_spectra_evol(sim::String, field::Symbol, varname::String;
         end
     end
 
-    xlims!(ax, (10^-3.5, 10^0.5))
+    xlims!(ax, (10^-4.5, 10^0.5))
     # 10 km scale boundary (submesoscale / mesoscale)
     vlines!(ax, [2π/10^4]; color = :red, linewidth = 0.5)
     axislegend(ax, labelsize = 10, patchsize = (20, 5), position = (:left, :bottom))
 
-    fname = filesave * "spectra$(varname)_" * "subdomain$(subdomain)_" * sim * "_evol.png"
+    fname = filesave * "spectra$(varname)_" * "$(fileparam)_" * sim * "_evol.png"
     save(fname, fig)
     println("Saved $fname")
 end
@@ -283,8 +374,8 @@ function spectra_uvwT(sim::String)
     if sim == "hy"
         println("------ Computing spectra from hydrostatic simulation ------")
         hy_data = compute_spectra_evol("hy")
-        # nhy_data left as `nothing` — plot_spectra_evol will use the cached
-        # nhy normalization factor instead of recomputing the full nhy pipeline.
+        # nhy_data left as `nothing` — plot_spectra_evol only needs the cached
+        # norm factor, not the full nhy pipeline.
     elseif sim == "nhy"
         println("------ Computing spectra from nonhydrostatic simulation ------")
         nhy_data = compute_spectra_evol("nhy")
