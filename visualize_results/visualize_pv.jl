@@ -664,31 +664,31 @@ fileparam = "region" * string(region)
 # # 2a. Compute filtered potential vorticity (for 10x10km tiles where snapshot contains [:T,:u,:v,:w])
 # plot_filteredPV(snapshot, fileparam)
 
-# # 2b. Load or compute PV variables 
+# 2b. Load or compute PV variables 
 
-# filter_scale = 300                                      # meters, bound between submesoscale and BLT
+filter_scale = 300                                      # meters, bound between submesoscale and BLT
 
-# # Cache of computed PV variables (x, y, horizontalq/verticalq/q, filtered & unfiltered)
-# pv_cache_file = filesave * fileparam * "_iter$(iteration)_pv.jld2"
-# # Load PV cache file if it exists, or compute PV
-# x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f = compute_load_pv(
-#             pv_cache_file, filehead, fileparam, iteration, dx, dy, dz, α, g, f, filter_scale)
-# # --- 
+# Cache of computed PV variables (x, y, horizontalq/verticalq/q, filtered & unfiltered)
+pv_cache_file = filesave * fileparam * "_iter$(iteration)_pv.jld2"
+# Load PV cache file if it exists, or compute PV
+x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f = compute_load_pv(
+            pv_cache_file, filehead, fileparam, iteration, dx, dy, dz, α, g, f, filter_scale)
+# --- 
 
-# # 3. Compute spectra for unfiltered and filtered q
+# 3. Compute spectra for unfiltered and filtered q
 
-# # Define cutoffs
-# cutoffs = 10 .^ range(4, 0, length=100)                 # 100 log-spaced values from 1e4 down to 1e0
-# K = 2π ./ cutoffs                                       # band edge wavenumbers, increasing
-# labels = ["κ ≤ 2π/$(cutoffs[1])",
-#         ["2π/$(cutoffs[n]) < κ ≤ 2π/$(cutoffs[n+1])" for n in 1:length(cutoffs)-1]...,
-#         "κ > 2π/$(cutoffs[end])"]
+# Define cutoffs
+cutoffs = 10 .^ range(4, 0, length=100)                 # 100 log-spaced values from 1e4 down to 1e0
+K = 2π ./ cutoffs                                       # band edge wavenumbers, increasing
+labels = ["κ ≤ 2π/$(cutoffs[1])",
+        ["2π/$(cutoffs[n]) < κ ≤ 2π/$(cutoffs[n+1])" for n in 1:length(cutoffs)-1]...,
+        "κ > 2π/$(cutoffs[end])"]
 
-# # Cache of computed PV spectra/bands (filtered & unfiltered)
-# pvspectra_cache_file = filesave * fileparam * "_iter$(iteration)_pvspectra.jld2"
-# # Load PV spectra cache file if it exists, or compute PV spectra
-# S_quf, bands_quf, S_qf, bands_qf, S_horquf, S_verquf, S_horqf, S_verqf = compute_load_pvspectra(
-#                     pvspectra_cache_file, labels, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f)
+# Cache of computed PV spectra/bands (filtered & unfiltered)
+pvspectra_cache_file = filesave * fileparam * "_iter$(iteration)_pvspectra.jld2"
+# Load PV spectra cache file if it exists, or compute PV spectra
+S_quf, bands_quf, S_qf, bands_qf, S_horquf, S_verquf, S_horqf, S_verqf = compute_load_pvspectra(
+                    pvspectra_cache_file, labels, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f)
 
 # --- 
 
