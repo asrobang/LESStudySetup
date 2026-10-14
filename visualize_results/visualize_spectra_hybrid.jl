@@ -18,7 +18,7 @@ hy_metadata  = hy_filehead * "experiment_hydrostatic_twin_simulation_metadata.jl
 
 nhy_filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/"
 
-filesave = "/home/asrobang/orcd/scratch/figures/20260922_regionABC_spectra/"
+filesave = "/home/asrobang/orcd/scratch/figures/20260927_regionABC_redo/"
 
 # =============================================================================
 # --- Shared physical parameters ---
@@ -51,7 +51,8 @@ nhy_klev = 70        # z = -2.8125 m in the nonhydrostatic subdomain grid
 hy_xrange = vcat(583:640, 1:7)
 hy_yrange = 391:455
 
-fileparam = "regionC"
+# ! ! ! ! ! EDIT THIS ONE TO SWITCH REGION ! ! ! ! !
+fileparam = "regionB"
 
 # --- Day <-> snapshot_number (hy) / iteration (nhy) correspondence ---
 # days              = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5]
@@ -195,12 +196,6 @@ end
 # end
 
 # =============================================================================
-# --- In-memory cache: avoids recomputing hy/nhy spectra across multiple
-#     spectra_uvwT(...) calls within the same Julia session. ---
-# =============================================================================
-const SPECTRA_CACHE = Dict{String, NamedTuple}()
-
-# =============================================================================
 # --- On-disk cache of the full St/Su/Sv/Sw spectra vectors (all days), so a
 #     fresh Julia session can reload previously-computed spectra evolution
 #     instead of recomputing it from raw simulation snapshots. ---
@@ -238,19 +233,11 @@ function load_spectra_cache(sim::String)
 end
 
 function compute_spectra_evol(sim::String; force_recompute=false)
-    if !force_recompute && haskey(SPECTRA_CACHE, sim)
-        println("Using cached $sim spectra (already computed this session)...")
-        return SPECTRA_CACHE[sim]
-    end
-
     if !force_recompute && isfile(spectra_cache_file(sim)) && spectra_cache_is_current(sim)
-        result = load_spectra_cache(sim)
-        SPECTRA_CACHE[sim] = result
-        return result
+        return load_spectra_cache(sim)
     end
 
     result = _compute_spectra_evol_uncached(sim)
-    SPECTRA_CACHE[sim] = result
     save_spectra_cache(sim, result)
     return result
 end
