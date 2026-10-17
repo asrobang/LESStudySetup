@@ -11,7 +11,7 @@ set_theme!(theme_latexfonts(), fontsize=12, figure_padding = 10)
 
 # --- Set file directories ---
 filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/" 
-filesave = "/home/asrobang/orcd/scratch/figures/20260913_regionABC_figs/"
+filesave = "/home/asrobang/orcd/scratch/figures/20261014_regionABC_kinematics/"
 
 # --- Set parameters ---
 set_value!(; Δh = 4.8828125)    # horizontal spacing
@@ -44,24 +44,25 @@ function compute_dAdz(A_above,A_below,dz)
     return dAdz
 end
 
-"""
-    lowpass_filter(field, k, smooth)
-
-Apply a sharp spectral cutoff filter to `field`, removing all horizontal
-scales smaller than `smooth` (a physical length, e.g. in meters — NOT a
-number of grid cells).
-
-Cutoff wavenumber:
-    K = 2π / smooth
-
-This generalizes the "4Δx smoothing → K = π/(2Δx)" recipe: if smooth = 4Δx,
-then K = π/(2·(smooth/4)) = 2π/smooth, so K = 2π/smooth works for any
-smoothing scale.
-
-Assumes a horizontally uniform grid. Works on 2D (Nx, Ny) slices or
-3D (Nx, Ny, Nz) fields (filtered level-by-level in the horizontal).
-"""
 function lowpass_filter(field, k, smooth)
+    """
+        lowpass_filter(field, k, smooth)
+
+    Apply a sharp spectral cutoff filter to `field`, removing all horizontal
+    scales smaller than `smooth` (a physical length, e.g. in meters — NOT a
+    number of grid cells).
+
+    Cutoff wavenumber:
+        K = 2π / smooth
+
+    This generalizes the "4Δx smoothing → K = π/(2Δx)" recipe: if smooth = 4Δx,
+    then K = π/(2·(smooth/4)) = 2π/smooth, so K = 2π/smooth works for any
+    smoothing scale.
+
+    Assumes a horizontally uniform grid. Works on 2D (Nx, Ny) slices or
+    3D (Nx, Ny, Nz) fields (filtered level-by-level in the horizontal).
+    """
+
     grid = field.grid
     Δx = minimum(xspacings(grid, Center()))
     Δy = minimum(yspacings(grid, Center()))
@@ -100,31 +101,31 @@ function lowpass_filter(field, k, smooth)
     return filtered
 end
 
-
-"""
-    bandpass_filter(field, dx, dy, cutoffs)
-
-Split `field` into multiple horizontal bands using a series of sharp
-spectral cutoffs (κ = √(k² + l²), periodic FFT in x, y).
-
-`cutoffs` should be given as physical smoothing scales (same units as
-dx, dy), sorted from largest scale to smallest, e.g.:
-
-    cutoffs = [1e4, 1e3, 1e2, 1e1, 1e0]
-
-which corresponds to wavenumber cutoffs K = 2π / cutoffs, i.e.
-K = [2π/10⁴, 2π/10³, 2π/10², 2π/10¹, 2π/10⁰].
-
-Returns a Dict mapping each band (as a string label) to the filtered field
-containing only that band's wavenumbers. Bands are:
-
-    band 1: κ ≤ K[1]                     (largest scales, > cutoffs[1])
-    band 2: K[1] < κ ≤ K[2]
-    band 3: K[2] < κ ≤ K[3]
-    ...
-    band N+1: κ > K[N]                   (smallest scales, < cutoffs[end])
-"""
 function bandpass_filter(field, dx, dy, cutoffs)
+    """
+        bandpass_filter(field, dx, dy, cutoffs)
+
+    Split `field` into multiple horizontal bands using a series of sharp
+    spectral cutoffs (κ = √(k² + l²), periodic FFT in x, y).
+
+    `cutoffs` should be given as physical smoothing scales (same units as
+    dx, dy), sorted from largest scale to smallest, e.g.:
+
+        cutoffs = [1e4, 1e3, 1e2, 1e1, 1e0]
+
+    which corresponds to wavenumber cutoffs K = 2π / cutoffs, i.e.
+    K = [2π/10⁴, 2π/10³, 2π/10², 2π/10¹, 2π/10⁰].
+
+    Returns a Dict mapping each band (as a string label) to the filtered field
+    containing only that band's wavenumbers. Bands are:
+
+        band 1: κ ≤ K[1]                     (largest scales, > cutoffs[1])
+        band 2: K[1] < κ ≤ K[2]
+        band 3: K[2] < κ ≤ K[3]
+        ...
+        band N+1: κ > K[N]                   (smallest scales, < cutoffs[end])
+    """
+
     Nx, Ny = size(field, 1), size(field, 2)
 
     kx = 2π .* fftfreq(Nx, 1/dx)
@@ -153,6 +154,42 @@ function bandpass_filter(field, dx, dy, cutoffs)
     results["κ > 2π/$(cutoffs[end])"] = real.(ifft(f̂ .* mask))
 
     return results
+end
+
+function gaussian_filter(field, k, smooth; periodic_x=true, periodic_y=true)
+    """
+        gaussian_filter(field, k, smooth; periodic_x=true, periodic_y=true)
+
+    Gaussian low-pass filter (width Δ = `smooth`, physical length) applied in the
+    horizontal to level `k` of `field`. Transfer function exp(-κ²Δ²/24).
+
+    Non-periodic directions are mirror-padded (half-sample symmetric reflection,
+    appropriate for cell-centered data) before the FFT. This is equivalent to a
+    zero-gradient condition at those edges and avoids wraparound contamination.
+    """
+    grid = field.grid
+    Δx = minimum(xspacings(grid, Center()))
+    Δy = minimum(yspacings(grid, Center()))
+
+    data = Array(interior(field, :, :, k))
+    Nx, Ny = size(data)
+
+    # Mirror-pad non-periodic directions
+    padded = periodic_x ? data : vcat(data, reverse(data, dims=1))
+    padded = periodic_y ? padded : hcat(padded, reverse(padded, dims=2))
+    Mx, My = size(padded)
+
+    # Wavenumbers for the padded array
+    kx = 2π .* rfftfreq(Mx, 1/Δx)
+    ky = 2π .* fftfreq(My, 1/Δy)
+    κ² = (kx .^ 2) .+ (ky' .^ 2)
+    Ĝ = @. exp(-κ² * smooth^2 / 24)
+
+    f̂ = rfft(padded)
+    f̂ .*= Ĝ
+    filtered = irfft(f̂, Mx)
+
+    return filtered[1:Nx, 1:Ny]   # drop the mirrored copy
 end
 
 # Map each frequency to the band-max value it falls into
@@ -194,9 +231,12 @@ function compute_load_pv(pv_cache_file, filehead, fileparam, iteration, dx, dy, 
         T_uf, T_above, T_below = nothing, nothing, nothing      # free the variable
         GC.gc()                                                 # force the garbage collector to run immediately
 
-        T_f = lowpass_filter(snapshot[:T], 70, filter_scale)            # 2048×2048 Matrix{Float32}
-        T_f_above = lowpass_filter(snapshot[:T], 71, filter_scale)
-        T_f_below = lowpass_filter(snapshot[:T], 69, filter_scale)
+        # T_f = lowpass_filter(snapshot[:T], 70, filter_scale)            # 2048×2048 Matrix{Float32}
+        # T_f_above = lowpass_filter(snapshot[:T], 71, filter_scale)
+        # T_f_below = lowpass_filter(snapshot[:T], 69, filter_scale)
+        T_f = gaussian_filter(snapshot[:T], 70, filter_scale)            # 2048×2048 Matrix{Float32}
+        T_f_above = gaussian_filter(snapshot[:T], 71, filter_scale)
+        T_f_below = gaussian_filter(snapshot[:T], 69, filter_scale)
         dTdx_f, dTdy_f = compute_dAdx_dAdy(T_f,dx,dy) 
         dTdz_f = compute_dAdz(T_f_above,T_f_below,dz)
         println("Computed filtered T gradients")
@@ -218,9 +258,12 @@ function compute_load_pv(pv_cache_file, filehead, fileparam, iteration, dx, dy, 
         u_uf, u_above, u_below = nothing, nothing, nothing      # free the variable
         GC.gc()                                                 # force the garbage collector to run immediately
 
-        u_f = lowpass_filter(snapshot[:u], 70, filter_scale)[1:end-1, :]  # initially 2049×2048 Matrix{Float32}
-        u_f_above = lowpass_filter(snapshot[:u], 71, filter_scale)[1:end-1, :]
-        u_f_below = lowpass_filter(snapshot[:u], 69, filter_scale)[1:end-1, :]
+        # u_f = lowpass_filter(snapshot[:u], 70, filter_scale)[1:end-1, :]  # initially 2049×2048 Matrix{Float32}
+        # u_f_above = lowpass_filter(snapshot[:u], 71, filter_scale)[1:end-1, :]
+        # u_f_below = lowpass_filter(snapshot[:u], 69, filter_scale)[1:end-1, :]
+        u_f = gaussian_filter(snapshot[:u], 70, filter_scale)[1:end-1, :]  # initially 2049×2048 Matrix{Float32}
+        u_f_above = gaussian_filter(snapshot[:u], 71, filter_scale)[1:end-1, :]
+        u_f_below = gaussian_filter(snapshot[:u], 69, filter_scale)[1:end-1, :]
         dudx_f, dudy_f = compute_dAdx_dAdy(u_f,dx,dy) 
         dudz_f = compute_dAdz(u_f_above,u_f_below,dz)
         println("Computed filtered u gradients")
@@ -242,9 +285,12 @@ function compute_load_pv(pv_cache_file, filehead, fileparam, iteration, dx, dy, 
         v_uf, v_above, v_below = nothing, nothing, nothing      # free the variable
         GC.gc()                                                 # force the garbage collector to run immediately
 
-        v_f = lowpass_filter(snapshot[:v], 70, filter_scale)[:, 1:end-1]  # initially 2048×2049 Matrix{Float32}
-        v_f_above = lowpass_filter(snapshot[:v], 71, filter_scale)[:, 1:end-1]
-        v_f_below = lowpass_filter(snapshot[:v], 69, filter_scale)[:, 1:end-1]
+        # v_f = lowpass_filter(snapshot[:v], 70, filter_scale)[:, 1:end-1]  # initially 2048×2049 Matrix{Float32}
+        # v_f_above = lowpass_filter(snapshot[:v], 71, filter_scale)[:, 1:end-1]
+        # v_f_below = lowpass_filter(snapshot[:v], 69, filter_scale)[:, 1:end-1]
+        v_f = gaussian_filter(snapshot[:v], 70, filter_scale)[:, 1:end-1]  # initially 2048×2049 Matrix{Float32}
+        v_f_above = gaussian_filter(snapshot[:v], 71, filter_scale)[:, 1:end-1]
+        v_f_below = gaussian_filter(snapshot[:v], 69, filter_scale)[:, 1:end-1]
         dvdx_f, dvdy_f = compute_dAdx_dAdy(v_f,dx,dy) 
         dvdz_f = compute_dAdz(v_f_above,v_f_below,dz)
         println("Computed filtered v gradients")
@@ -265,9 +311,12 @@ function compute_load_pv(pv_cache_file, filehead, fileparam, iteration, dx, dy, 
         w_uf, w_above, w_below = nothing, nothing, nothing      # free the variable
         GC.gc()                                                 # force the garbage collector to run immediately
 
-        w_f = lowpass_filter(snapshot[:w], 70, filter_scale)            # 2048×2048 Matrix{Float32}
-        w_f_above = lowpass_filter(snapshot[:w], 71, filter_scale)
-        w_f_below = lowpass_filter(snapshot[:w], 69, filter_scale)
+        # w_f = lowpass_filter(snapshot[:w], 70, filter_scale)            # 2048×2048 Matrix{Float32}
+        # w_f_above = lowpass_filter(snapshot[:w], 71, filter_scale)
+        # w_f_below = lowpass_filter(snapshot[:w], 69, filter_scale)
+        w_f = gaussian_filter(snapshot[:w], 70, filter_scale)            # 2048×2048 Matrix{Float32}
+        w_f_above = gaussian_filter(snapshot[:w], 71, filter_scale)
+        w_f_below = gaussian_filter(snapshot[:w], 69, filter_scale)
         dwdx_f, dwdy_f = compute_dAdx_dAdy(w_f,dx,dy) 
         println("Computed filtered w gradients")
         w_f, w_f_above, w_f_below = nothing, nothing, nothing   # free the variable
@@ -345,6 +394,7 @@ end
 ### -------------------------------------------------------------------------
 ### Plotting functions
 
+# For 10x10km tiles
 function plot_filteredPV(snapshot, fileparam)
     filter_scale = 300                                      # meters, bound between submesoscale and BLT
 
@@ -655,7 +705,7 @@ println("Iteration: $(iteration)")
 # snapshot = load_subdomain_snapshot(output_filename)
 
 # Region A/B/C
-region = "A"
+region = "C"
 println("--- Region $(region) ---")
 fileparam = "region" * string(region)
 
@@ -666,13 +716,21 @@ fileparam = "region" * string(region)
 
 # 2b. Load or compute PV variables 
 
-filter_scale = 300                                      # meters, bound between submesoscale and BLT
+filter_scale = 100                                      # meters, bound between submesoscale and BLT
 
 # Cache of computed PV variables (x, y, horizontalq/verticalq/q, filtered & unfiltered)
 pv_cache_file = filesave * fileparam * "_iter$(iteration)_pv.jld2"
 # Load PV cache file if it exists, or compute PV
 x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f = compute_load_pv(
             pv_cache_file, filehead, fileparam, iteration, dx, dy, dz, α, g, f, filter_scale)
+
+# Plot field and spectra of region
+plot_fieldspectra(x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f)
+
+# Clear variables - TEMPORARY SINCE I KNOW PVSPECTRA CACHE EXISTS
+horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f = ntuple(i -> nothing, 6)
+GC.gc()                                                 # force the garbage collector to run immediately
+
 # --- 
 
 # 3. Compute spectra for unfiltered and filtered q
@@ -686,11 +744,16 @@ labels = ["κ ≤ 2π/$(cutoffs[1])",
 
 # Cache of computed PV spectra/bands (filtered & unfiltered)
 pvspectra_cache_file = filesave * fileparam * "_iter$(iteration)_pvspectra.jld2"
-# Load PV spectra cache file if it exists, or compute PV spectra
-S_quf, bands_quf, S_qf, bands_qf, S_horquf, S_verquf, S_horqf, S_verqf = compute_load_pvspectra(
-                    pvspectra_cache_file, labels, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f)
+# # Load PV spectra cache file if it exists, or compute PV spectra
+# S_quf, bands_quf, S_qf, bands_qf, S_horquf, S_verquf, S_horqf, S_verqf = compute_load_pvspectra(
+#                     pvspectra_cache_file, labels, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f)
 
-# --- 
+# TEMPORARY SINCE I KNOW THE CACHE EXISTS
+println("Loading cached PV spectra variables from $pvspectra_cache_file...")
+S_quf, S_qf, S_horquf, S_verquf, S_horqf, S_verqf =
+    load(pvspectra_cache_file, "S_quf", "S_qf", "S_horquf", "S_verquf", "S_horqf", "S_verqf")
+
+# # --- 
 
 # # 4a. Color spectra plot according to max |q_uf| or max |q_f| by evaluating 100 band regimes
 # plot_spectra_colormag(filesave, fileparam, labels, K, S_quf, bands_quf, S_qf, bands_qf)
@@ -709,12 +772,13 @@ S_quf, bands_quf, S_qf, bands_qf, S_horquf, S_verquf, S_horqf, S_verqf = compute
 # end
 # # ===== END TEMPORARY =====
 
-# # 4b. Plot spectra of total, horizontal, and vertical PV components
-# plot_spectra_components(filesave, fileparam, S_quf, S_horquf, S_verquf, S_qf, S_horqf, S_verqf)
+# 4b. Plot spectra of total, horizontal, and vertical PV components
+plot_spectra_components(filesave, fileparam, S_quf, S_horquf, S_verquf, S_qf, S_horqf, S_verqf)
 
-# 4c. Compare total/horizontal/vertical PV spectra across regions A, B, C
-if all(region -> isfile(filesave * "region$(region)_iter$(iteration)_pvspectra.jld2"), ["A", "B", "C"])
-    plot_spectra_regions(filesave, iteration)
-else
-    println("Skipping region comparison: not all region A/B/C spectra caches exist yet")
-end
+# # 4c. Compare total/horizontal/vertical PV spectra across regions A, B, C
+# if all(region -> isfile(filesave * "region$(region)_iter$(iteration)_pvspectra.jld2"), ["A", "B", "C"])
+#     plot_spectra_regions(filesave, iteration)
+# else
+#     println("Skipping region comparison: not all region A/B/C spectra caches exist yet")
+# end
+
