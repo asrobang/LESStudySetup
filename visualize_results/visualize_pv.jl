@@ -633,25 +633,46 @@ function plot_spectra_components(filesave, fileparam, S_quf, S_horquf, S_verquf,
 
     # --- Plot spectra of total, horizontal, and vertical components of unfiltered q ---
     fig = Figure(size = (600, 500))
-    ax = Axis(fig[1, 1]; title=L"q_{uf}, z=-2.8125 m", axis_kwargs...)
-    lines!(ax, collect(S_quf.freq), Real.(S_quf.spec ./ S0); color = :purple, linewidth = 2, label = L"q")
-    lines!(ax, collect(S_horquf.freq), Real.(S_horquf.spec ./ S0); color = :red, linewidth = 2, label = L"q_{h}")
-    lines!(ax, collect(S_verquf.freq), Real.(S_verquf.spec ./ S0); color = :blue, linewidth = 2, label = L"q_{v}")
-    vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
-    axislegend(ax; position = :lb)
-    save(filesave * fileparam * "_spectracomp_quf.png", fig)
-    println("Saved figure of q_uf component spectra")
+    # ax = Axis(fig[1, 1]; title=L"q_{uf}, z=-2.8125 m", axis_kwargs...)
+    ax = Axis(fig[1, 1]; title=L"q, z=-2.8125 m", axis_kwargs...)
 
-    # --- Plot spectra of total, horizontal, and vertical components of filtered q ---
-    fig = Figure(size = (600, 500))
-    ax = Axis(fig[1, 1]; title=L"q_{f}, z=-2.8125 m", axis_kwargs...)
-    lines!(ax, collect(S_qf.freq), Real.(S_qf.spec ./ S0); color = :purple, linewidth = 2, label = L"q")
-    lines!(ax, collect(S_horqf.freq), Real.(S_horqf.spec ./ S0); color = :red, linewidth = 2, label = L"q_{h}")
-    lines!(ax, collect(S_verqf.freq), Real.(S_verqf.spec ./ S0); color = :blue, linewidth = 2, label = L"q_{v}")
-    vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
+    # Shaded wavenumber bands (drawn first so they sit behind the lines)
+    k_10km  = 2π / 10000     # λ = 10 km
+    k_300m  = 2π / 300       # λ = 300 m
+    k_right = 10^0.5         # right edge of the x-limits
+    vspan!(ax, k_10km, k_right, color = (:lightblue, 0.15))   # light blue: k > 2π/10000
+    vspan!(ax, k_300m, k_right, color = (:steelblue, 0.15))  # darker: k > 2π/300 (layers on top of the light band)
+
+    lines!(ax, collect(S_quf.freq), Real.(S_quf.spec ./ S0); color = :purple, linestyle=:dash, linewidth = 2, label = L"q, unfiltered")
+    lines!(ax, collect(S_horquf.freq), Real.(S_horquf.spec ./ S0); color = :red, linestyle=:dash, linewidth = 2, label = L"q_{h}, unfiltered")
+    lines!(ax, collect(S_verquf.freq), Real.(S_verquf.spec ./ S0); color = :blue, linestyle=:dash, linewidth = 2, label = L"q_{v}, unfiltered")
+    # # vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
+    # axislegend(ax; position = :lb)
+    # save(filesave * fileparam * "_spectracomp_quf.png", fig)
+    # println("Saved figure of q_uf component spectra")
+
+    # # --- Plot spectra of total, horizontal, and vertical components of filtered q ---
+    # fig = Figure(size = (600, 500))
+    # ax = Axis(fig[1, 1]; title=L"q_{f}, z=-2.8125 m", axis_kwargs...)
+    
+    # # Shaded wavenumber bands (drawn first so they sit behind the lines)
+    # k_10km  = 2π / 10000     # λ = 10 km
+    # k_300m  = 2π / 300       # λ = 300 m
+    # k_right = 10^0.5         # right edge of the x-limits
+    # vspan!(ax, k_10km, k_right, color = (:lightblue, 0.15))   # light blue: k > 2π/10000
+    # vspan!(ax, k_300m, k_right, color = (:steelblue, 0.15))  # darker: k > 2π/300 (layers on top of the light band)
+
+    lines!(ax, collect(S_qf.freq), Real.(S_qf.spec ./ S0); color = :purple, linewidth = 2, label = L"q, filtered")
+    lines!(ax, collect(S_horqf.freq), Real.(S_horqf.spec ./ S0); color = :red, linewidth = 2, label = L"q_{h}, filtered")
+    lines!(ax, collect(S_verqf.freq), Real.(S_verqf.spec ./ S0); color = :blue, linewidth = 2, label = L"q_{v}, filtered")
+    limits!(ax, (10^-4, 10^0), (1e-4, 1e2))
+    # vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
     axislegend(ax; position = :lb)
-    save(filesave * fileparam * "_spectracomp_qf.png", fig)
-    println("Saved figure of q_f component spectra")
+    # save(filesave * fileparam * "_spectracomp_qf.png", fig)
+    # println("Saved figure of q_f component spectra")
+
+    save(filesave * fileparam * "_spectracomp_q.png", fig)
+    println("Saved figure of q component spectra")
 end
 
 function plot_spectra_regions(filesave, iteration; regions = ["A", "B", "C"])
@@ -672,6 +693,14 @@ function plot_spectra_regions(filesave, iteration; regions = ["A", "B", "C"])
         ax = Axis(fig[1, 1]; title = ttl, xlabel = "Wavenumber (rad⋅m⁻¹)",
                 ylabel = L"E(k)/E_{q_{h,f}}^{C} (k_{min})",
                 xscale = log10, yscale = log10)
+
+        # Shaded wavenumber bands (drawn first so they sit behind the lines)
+        k_10km  = 2π / 10000     # λ = 10 km
+        k_300m  = 2π / 300       # λ = 300 m
+        k_right = 10^0.5         # right edge of the x-limits
+        vspan!(ax, k_10km, k_right, color = (:lightblue, 0.15))   # light blue: k > 2π/10000
+        vspan!(ax, k_300m, k_right, color = (:steelblue, 0.15))  # darker: k > 2π/300 (layers on top of the light band)
+
         for (n, region) in enumerate(regions)
             S_uf, S_filt = spectra[region][iuf], spectra[region][ifilt]
             lines!(ax, collect(S_uf.freq), Real.(S_uf.spec ./ S0); color = colors[n], linewidth = 2,
@@ -679,9 +708,8 @@ function plot_spectra_regions(filesave, iteration; regions = ["A", "B", "C"])
             lines!(ax, collect(S_filt.freq), Real.(S_filt.spec ./ S0); color = colors[n], linewidth = 2,
                    label = "Region $(region), filtered")
         end
-        # xlims!(ax, (10^-4.5, 10^0.5))
-        limits!(ax, (10^-4, 10^0), (1e-6, 1e2))
-        vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
+        limits!(ax, (10^-4, 10^0), (1e-4, 1e2))
+        # vlines!(ax, [2π/10^4]; color = :black, linewidth = 0.5)
         axislegend(ax; position = :lb)
         save(filesave * "regionABC_iter$(iteration)_spectra_$(suffix).png", fig)
         println("Saved figure of $(suffix) spectra for regions $(join(regions, ", "))")
@@ -718,18 +746,18 @@ fileparam = "region" * string(region)
 
 filter_scale = 100                                      # meters, bound between submesoscale and BLT
 
-# Cache of computed PV variables (x, y, horizontalq/verticalq/q, filtered & unfiltered)
-pv_cache_file = filesave * fileparam * "_iter$(iteration)_pv.jld2"
-# Load PV cache file if it exists, or compute PV
-x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f = compute_load_pv(
-            pv_cache_file, filehead, fileparam, iteration, dx, dy, dz, α, g, f, filter_scale)
+# # Cache of computed PV variables (x, y, horizontalq/verticalq/q, filtered & unfiltered)
+# pv_cache_file = filesave * fileparam * "_iter$(iteration)_pv.jld2"
+# # Load PV cache file if it exists, or compute PV
+# x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f = compute_load_pv(
+#             pv_cache_file, filehead, fileparam, iteration, dx, dy, dz, α, g, f, filter_scale)
 
-# Plot field and spectra of region
-plot_fieldspectra(x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f)
+# # Plot field and spectra of region
+# plot_fieldspectra(x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f)
 
-# Clear variables - TEMPORARY SINCE I KNOW PVSPECTRA CACHE EXISTS
-horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f = ntuple(i -> nothing, 6)
-GC.gc()                                                 # force the garbage collector to run immediately
+# # Clear variables - TEMPORARY SINCE I KNOW PVSPECTRA CACHE EXISTS
+# horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f = ntuple(i -> nothing, 6)
+# GC.gc()                                                 # force the garbage collector to run immediately
 
 # --- 
 

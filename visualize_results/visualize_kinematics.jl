@@ -468,7 +468,7 @@ function plot_spectra(iteration, klev, α, g, dx, dy, filter_scale, var; regions
             label = "Region $(region), filtered")
     end
 
-    # limits!(ax, (10^-4, 10^0), (1e-6, 1e2))
+    limits!(ax, (10^-4, 10^0), (1e-4, 1e8))
     axislegend(ax; position = :lb)
 
     save(filesave * "regionABC_iter$(iteration)_spectra_$(var).png", fig)
@@ -502,10 +502,10 @@ grad_cache_file = filesave * fileparam * "_iter$(iteration)_grad.jld2"
 # plot_image(grad_cache_file, filehead, fileparam, iteration, klev, α, g, dx, dy, filter_scale, "div")
 # plot_image(grad_cache_file, filehead, fileparam, iteration, klev, α, g, dx, dy, filter_scale, "strain_n")
 # plot_image(grad_cache_file, filehead, fileparam, iteration, klev, α, g, dx, dy, filter_scale, "strain_s")
-plot_image(grad_cache_file, filehead, fileparam, iteration, klev, α, g, dx, dy, filter_scale, "strain")
+# plot_image(grad_cache_file, filehead, fileparam, iteration, klev, α, g, dx, dy, filter_scale, "strain")
 
 # 2. Load/compute variables' spectra and plot spectra
-# plot_spectra(iteration, klev, α, g, dx, dy, filter_scale, "front")
+plot_spectra(iteration, klev, α, g, dx, dy, filter_scale, "front")
 # plot_spectra(iteration, klev, α, g, dx, dy, filter_scale, "vort")
 # plot_spectra(iteration, klev, α, g, dx, dy, filter_scale, "div")
 # plot_spectra(iteration, klev, α, g, dx, dy, filter_scale, "strain_n")
