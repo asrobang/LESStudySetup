@@ -26,7 +26,7 @@ end
 filehead = "/orcd/data/abodner/002/shared_datasets/hyles_output/"
 filename = filehead * "hydrostatic_snapshots_" * fileparams * ".jld2"
 metadata = filehead * "experiment_" * fileparams * "_metadata.jld2"
-filesave = "/home/asrobang/orcd/scratch/figures/20260913_regionABC_figs/"
+filesave = "/home/asrobang/orcd/scratch/figures/20261014_regionABC_kinematics/"
 
 # --- Set parameters ---
 set_value!(; Δh = 156.25)    # horizontal spacing
@@ -42,16 +42,17 @@ dx = 156.25                    # [m] horizontal grid size
 dy = 156.25                    # [m] horizontal grid size
 dz = 1.125                      # [m] vertical grid size
 
-# Double check grid spacing
-# xu, yu, zu = nodes(snapshots[:u])
-# Δx = xu[2] - xu[1]   # spacing between adjacent x-nodes
-# Δy = yu[2] - yu[1]
-# xT, yT, zT = nodes(snapshots[:T])   # or nodes(snapshots[:w]) for face-centered z
-# Δz = zT[2]-zT[1] # diff(zT)                       # vector of spacings between consecutive z-levels
-
 # load all the data!!
 println("Loading data from $filename...")
 snapshots = load_snapshots(filename; metadata)
+
+# Double check grid spacing
+xu, yu, zu = nodes(snapshots[:u])
+Δx = xu[2] - xu[1]   # spacing between adjacent x-nodes
+Δy = yu[2] - yu[1]
+xT, yT, zT = nodes(snapshots[:T])                  # or nodes(snapshots[:w]) for face-centered z
+zT = zT .+ 6.75
+Δz = zT[2]-zT[1] # diff(zT)                       # vector of spacings between consecutive z-levels
 
 # ### -------------------------------------------------------------------------
 
