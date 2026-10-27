@@ -4,14 +4,14 @@ using Printf
 using FFTW
 using Oceananigans.Grids: xnodes, ynodes, znodes, xspacings, yspacings
 using Oceananigans.Fields: interior
-using LESStudySetup.Diagnostics: load_subdomain_snapshot, isotropic_powerspectrum
+using LESStudySetup.Diagnostics: load_subdomain_snapshot, load_snapshots, isotropic_powerspectrum
 using MathTeXEngine
 using JLD2 #, CUDA
 set_theme!(theme_latexfonts(), fontsize=12, figure_padding = 10)
 
 # --- Set file directories ---
 filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/" 
-filesave = "/home/asrobang/orcd/scratch/figures/20261014_regionABC_kinematics/"
+filesave = "/home/asrobang/orcd/scratch/figures/20261019_hy/"
 
 # --- Set parameters ---
 set_value!(; Δh = 4.8828125)    # horizontal spacing
@@ -355,21 +355,21 @@ end
 function compute_load_pvspectra(pvspectra_cache_file, labels, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f)
     if isfile(pvspectra_cache_file)
         println("Loading cached PV spectra variables from $pvspectra_cache_file...")
-        S_quf, bands_quf, S_qf, bands_qf, S_horquf, S_verquf, S_horqf, S_verqf =
-            load(pvspectra_cache_file, "S_quf", "bands_quf", "S_qf", "bands_qf", "S_horquf", "S_verquf", "S_horqf", "S_verqf")
+        S_quf, S_qf, S_horquf, S_verquf, S_horqf, S_verqf =
+            load(pvspectra_cache_file, "S_quf", "S_qf", "S_horquf", "S_verquf", "S_horqf", "S_verqf")
     else
 
         # Compute for spectra and band regimes for q_uf
         S_quf = isotropic_powerspectrum(q_uf, q_uf; Δx=dx, Δy=dy)
         println("Computed spectra of unfiltered q")
-        bands_quf = bandpass_filter(q_uf, dx, dy, cutoffs)      # compute bands
-        println("Computed spectra bands of unfiltered q")
+        # bands_quf = bandpass_filter(q_uf, dx, dy, cutoffs)      # compute bands
+        # println("Computed spectra bands of unfiltered q")
 
         # Compute for spectra and band regimes for q_f
         S_qf = isotropic_powerspectrum(q_f, q_f; Δx=dx, Δy=dy)
         println("Computed spectra of filtered q")
-        bands_qf = bandpass_filter(q_f, dx, dy, cutoffs)        # compute bands
-        println("Computed spectra bands of filtered q")
+        # bands_qf = bandpass_filter(q_f, dx, dy, cutoffs)        # compute bands
+        # println("Computed spectra bands of filtered q")
 
         # Compute for spectra of the horizontal and vertical components of q_uf and q_f
         S_horquf = isotropic_powerspectrum(horizontalq_uf, horizontalq_uf; Δx=dx, Δy=dy)
@@ -388,7 +388,86 @@ function compute_load_pvspectra(pvspectra_cache_file, labels, horizontalq_uf, ve
         println("Saved cached PV spectra variables to $pvspectra_cache_file")
     end # if isfile(pvspectra_cache_file)
 
-    return S_quf, bands_quf, S_qf, bands_qf, S_horquf, S_verquf, S_horqf, S_verqf
+    return S_quf, S_qf, S_horquf, S_verquf, S_horqf, S_verqf
+end
+
+### -------------------------------------------------------------------------
+### Hydrostatic (hy) simulation: full periodic domain, sliced to region A/B/C
+
+hy_filehead = "/orcd/data/abodner/002/shared_datasets/hyles_output/"
+hy_filename = hy_filehead * "hydrostatic_snapshots_hydrostatic_twin_simulation.jld2"
+hy_metadata = hy_filehead * "experiment_hydrostatic_twin_simulation_metadata.jld2"
+hy_dx, hy_dy = 156.25, 156.25     # [m] hy horizontal grid spacing
+hy_Nx, hy_Ny = 640, 640           # hy full-domain size (periodic)
+
+# Region index windows in the hy full domain (if left > right, the range wraps the periodic boundary)
+function hy_region_ranges(region)
+    if region == "A"
+        xL, xR = 352, 608
+        yB, yT = 192, 448
+    elseif region == "B"
+        xL, xR = 512, 128
+        yB, yT = 480, 96
+    elseif region == "C"
+        xL, xR = 64, 320
+        yB, yT = 192, 448
+    else
+        error("Subdomain not detected: region = \"$region\"; expected \"A\", \"B\", or \"C\".")
+    end
+    xrange = xL > xR ? vcat(xL:hy_Nx, 1:xR) : (xL:xR)
+    yrange = yB > yT ? vcat(yB:hy_Ny, 1:yT) : (yB:yT)
+    return xrange, yrange
+end
+
+# Forward differences along x (dim 1) and y (dim 2) of a periodic (Nx, Ny) array
+function compute_dAdx_dAdy_periodic(A, dx, dy)
+    dAdx = (circshift(A, (-1, 0)) .- A) ./ dx
+    dAdy = (circshift(A, (0, -1)) .- A) ./ dy
+    return dAdx, dAdy
+end
+
+function hy_compute_load_pv(pv_cache_file, region, snapshot_number, klev, dx, dy, dz, α, g, f)
+    if isfile(pv_cache_file)
+        println("Loading cached hy PV variables from $pv_cache_file...")
+        x, y, horizontalq_uf, verticalq_uf, q_uf =
+            load(pv_cache_file, "x", "y", "horizontalq_uf", "verticalq_uf", "q_uf")
+    else
+        xrange, yrange = hy_region_ranges(region)       # errors before loading data if region is invalid
+        set_value!(; Δh = hy_dx)
+        println("Loading hydrostatic data from $hy_filename...")
+        snapshots = load_snapshots(hy_filename; metadata = hy_metadata)
+        T = snapshots[:T][snapshot_number]
+        u = snapshots[:u][snapshot_number]
+        v = snapshots[:v][snapshot_number]
+        w = snapshots[:w][snapshot_number]
+        level(field, k) = Array(interior(field, :, :, k))
+
+        # Horizontal gradients on the full periodic domain at klev; vertical gradients centered on klev
+        dTdx, dTdy = compute_dAdx_dAdy_periodic(level(T, klev), dx, dy)
+        dTdz = compute_dAdz(level(T, klev+1), level(T, klev-1), dz)
+        _, dudy = compute_dAdx_dAdy_periodic(level(u, klev), dx, dy)
+        dudz = compute_dAdz(level(u, klev+1), level(u, klev-1), dz)
+        dvdx, _ = compute_dAdx_dAdy_periodic(level(v, klev), dx, dy)
+        dvdz = compute_dAdz(level(v, klev+1), level(v, klev-1), dz)
+        dwdx, dwdy = compute_dAdx_dAdy_periodic(level(w, klev), dx, dy)     # w at face klev, as in the nhy compute_load_pv
+        println("Computed unfiltered hy gradients")
+
+        # Unfiltered Ertel PV on the full domain, then sliced to the region
+        horizontalq_uf = (α*g) .* ( dTdx .* (dwdy.-dvdz) .+ dTdy .* (dudz.-dwdx) )      # horizontal q
+        verticalq_uf = (α*g) .* ( dTdz .* (dvdx.-dudy.+f) )                        # vertical q
+        q_uf = horizontalq_uf + verticalq_uf
+        horizontalq_uf, verticalq_uf, q_uf = (A[xrange, yrange] for A in (horizontalq_uf, verticalq_uf, q_uf))
+
+        # Monotonic region coordinates (unwrapped across the periodic boundary) for the heatmap
+        xT, yT, _ = nodes(T)
+        x = xT[first(xrange)] .+ (0:length(xrange)-1) .* dx
+        y = yT[first(yrange)] .+ (0:length(yrange)-1) .* dy
+
+        mkpath(filesave)
+        jldsave(pv_cache_file; x, y, horizontalq_uf, verticalq_uf, q_uf)
+        println("Saved cached hy PV variables to $pv_cache_file")
+    end
+    return x, y, horizontalq_uf, verticalq_uf, q_uf
 end
 
 ### -------------------------------------------------------------------------
@@ -716,97 +795,226 @@ function plot_spectra_regions(filesave, iteration; regions = ["A", "B", "C"])
     end
 end
 
+## Heatmaps of unfiltered hy q, horizontal q, and vertical q for a region
+function plot_fieldspectra_hy(x, y, horizontalq_uf, verticalq_uf, q_uf, region, snapshot_number; crange_static=(-5e-9,5e-9))
+    tag = "hy_region$(region)_snap$(snapshot_number)"
+    for (field, name, ttl, lbl) in [(q_uf,           "q_uf",           "Unfiltered Ertel PV",          L"q_{uf}"),
+                                    (horizontalq_uf, "horizontalq_uf", "Unfiltered horizontal q term", L"horizontal q"),
+                                    (verticalq_uf,   "verticalq_uf",   "Unfiltered vertical q term",   L"vertical q")]
+        fig = Figure(size = (700, 640))
+        ax = Axis(fig[1, 1]; aspect = DataAspect(),
+            title="hy region $(region): $(ttl) (min $(@sprintf("%.1e", minimum(field))), max $(@sprintf("%.1e", maximum(field))))")
+        hm = heatmap!(ax, 1e-3x, 1e-3y, field;
+                    rasterize = true, colormap = :balance, colorrange = crange_static)
+        Colorbar(fig[1, 2], hm, label=lbl)
+        save(filesave * tag * "_" * name * ".png", fig; px_per_unit=4)
+        println("Saved figure of hy $(name)")
+    end
+end
+
+## Spectra of unfiltered hy q and its horizontal / vertical components for a region
+function plot_spectra_components_hy(horizontalq_uf, verticalq_uf, q_uf, region, snapshot_number, dx, dy)
+    S_quf    = isotropic_powerspectrum(q_uf, q_uf; Δx=dx, Δy=dy)
+    S_horquf = isotropic_powerspectrum(horizontalq_uf, horizontalq_uf; Δx=dx, Δy=dy)
+    S_verquf = isotropic_powerspectrum(verticalq_uf, verticalq_uf; Δx=dx, Δy=dy)
+    S0 = S_quf.spec[1]          # normalize everything by unfiltered total q at k_min
+
+    fig = Figure(size = (600, 500))
+    ax = Axis(fig[1, 1]; title=L"q, z=-2.8125 m", xlabel = "Wavenumber (rad⋅m⁻¹)",
+            ylabel = L"E(k)/E_{q} (k_{min})", xscale = log10, yscale = log10)
+
+    # Shaded wavenumber bands (drawn first so they sit behind the lines)
+    k_10km  = 2π / 10000     # λ = 10 km
+    k_300m  = 2π / 300       # λ = 300 m
+    k_right = 10^0.5         # right edge of the x-limits
+    vspan!(ax, k_10km, k_right, color = (:lightblue, 0.15))
+    vspan!(ax, k_300m, k_right, color = (:steelblue, 0.15))
+
+    lines!(ax, collect(S_quf.freq), Real.(S_quf.spec ./ S0); color = :purple, linestyle=:dash, linewidth = 2, label = L"q, unfiltered")
+    lines!(ax, collect(S_horquf.freq), Real.(S_horquf.spec ./ S0); color = :red, linestyle=:dash, linewidth = 2, label = L"q_{h}, unfiltered")
+    lines!(ax, collect(S_verquf.freq), Real.(S_verquf.spec ./ S0); color = :blue, linestyle=:dash, linewidth = 2, label = L"q_{v}, unfiltered")
+    limits!(ax, (10^-4, 10^0), (1e-4, 1e2))
+    axislegend(ax; position = :lb)
+
+    save(filesave * "hy_region$(region)_snap$(snapshot_number)_spectracomp_q.png", fig)
+    println("Saved figure of hy q component spectra")
+end
+
+## Compare unfiltered nhy, filtered nhy, and hy PV spectra (total, horizontal, vertical) across regions A, B, C
+function plot_spectra_regions_hybrid(filesave, iteration, hy_snapshot, hy_klev; regions = ["A", "B", "C"])
+    nhy_files = Dict(region => filesave * "region$(region)_iter$(iteration)_pvspectra.jld2" for region in regions)
+    missing_files = [file for file in values(nhy_files) if !isfile(file)]
+    isempty(missing_files) || error("Missing nhy PV spectra caches (run the nhy path for these regions first): $(join(missing_files, ", "))")
+
+    colors = Makie.wong_colors()[1:length(regions)]     # one color per region
+    nhy_spectra = Dict(region => load(nhy_files[region],
+                                    "S_quf", "S_qf", "S_horquf", "S_horqf", "S_verquf", "S_verqf")
+                       for region in regions)           # only the spectra, not the large bands
+
+    hy_spectra = Dict{String, Any}()
+    for region in regions
+        pv_cache_file = filesave * "hy_region$(region)_snap$(hy_snapshot)_k$(hy_klev)_pv.jld2"
+        _, _, horizontalq_uf, verticalq_uf, q_uf = hy_compute_load_pv(
+            pv_cache_file, region, hy_snapshot, hy_klev, hy_dx, hy_dy, dz, α, g, f)
+        hy_spectra[region] = (isotropic_powerspectrum(q_uf, q_uf; Δx=hy_dx, Δy=hy_dy),
+                              isotropic_powerspectrum(horizontalq_uf, horizontalq_uf; Δx=hy_dx, Δy=hy_dy),
+                              isotropic_powerspectrum(verticalq_uf, verticalq_uf; Δx=hy_dx, Δy=hy_dy))
+    end
+
+    S0 = nhy_spectra["C"][4].spec[1]            # normalize everything by filtered horizontal q of region C at k_min
+
+    # (nhy unfiltered index, nhy filtered index, hy index, title, file suffix)
+    components = [(1, 2, 1, L"q", "q"),
+                  (3, 4, 2, L"q_{h}", "horq"),
+                  (5, 6, 3, L"q_{v}", "verq")]
+
+    for (iuf, ifilt, ihy, ttl, suffix) in components
+        fig = Figure(size = (750, 500))
+        ax = Axis(fig[1, 1]; title = ttl, xlabel = "Wavenumber (rad⋅m⁻¹)",
+                ylabel = L"E(k)/E_{q_{h,f}}^{C} (k_{min})",
+                xscale = log10, yscale = log10)
+
+        # Shaded wavenumber bands (drawn first so they sit behind the lines)
+        k_10km  = 2π / 10000     # λ = 10 km
+        k_300m  = 2π / 300       # λ = 300 m
+        k_right = 10^0.5         # right edge of the x-limits
+        vspan!(ax, k_10km, k_right, color = (:lightblue, 0.15))
+        vspan!(ax, k_300m, k_right, color = (:steelblue, 0.15))
+
+        for (n, region) in enumerate(regions)
+            S_uf, S_filt = nhy_spectra[region][iuf], nhy_spectra[region][ifilt]
+            S_hy = hy_spectra[region][ihy]
+            lines!(ax, collect(S_uf.freq), Real.(S_uf.spec ./ S0); color = colors[n], linewidth = 2,
+                   linestyle = :dash, label = "Region $(region), nhy unfiltered")
+            lines!(ax, collect(S_filt.freq), Real.(S_filt.spec ./ S0); color = colors[n], linewidth = 2,
+                   label = "Region $(region), nhy filtered")
+            lines!(ax, collect(S_hy.freq), Real.(S_hy.spec ./ S0); color = colors[n], linewidth = 2,
+                   linestyle = :dot, label = "Region $(region), hy")
+        end
+        limits!(ax, (10^-4, 10^0), (1e-4, 1e2))
+        # axislegend(ax; position = :lb, labelsize = 9)
+        Legend(fig[1, 2], ax; labelsize = 9)
+        save(filesave * "regionABC_iter$(iteration)_snap$(hy_snapshot)_spectra_hybrid_$(suffix).png", fig)
+        println("Saved figure of hy/nhy $(suffix) spectra for regions $(join(regions, ", "))")
+    end
+end
+
 ### -------------------------------------------------------------------------
 ## Plot the heatmap plots of each subdomain tile
 
-# 1. Define subdomain
-
-# Identify iteration (which denotes timestep)
-iteration = 164410
-println("Iteration: $(iteration)")
-
-# # 10km x 10km Tiles
-# i = 97
-# println("--- Subdomain $(i) ---")
-# fileparam = "subdomain" * string(i)
-# output_filename = filehead * fileparam * "_iter$(iteration).jld2"
-# snapshot = load_subdomain_snapshot(output_filename)
+# ! ! ! ! ! EDIT THIS ONE TO SWITCH SIMULATION ! ! ! ! !
+sim = "both"     # "hy", "nhy", or "both"
+println("Simulation: $(sim)")
 
 # Region A/B/C
 region = "C"
 println("--- Region $(region) ---")
-fileparam = "region" * string(region)
 
-# ---
+if sim == "nhy"
+    # 1. Define subdomain
 
-# # 2a. Compute filtered potential vorticity (for 10x10km tiles where snapshot contains [:T,:u,:v,:w])
-# plot_filteredPV(snapshot, fileparam)
+    # Identify iteration (which denotes timestep)
+    iteration = 164410
+    println("Iteration: $(iteration)")
 
-# 2b. Load or compute PV variables 
+    # # 10km x 10km Tiles
+    # i = 97
+    # println("--- Subdomain $(i) ---")
+    # fileparam = "subdomain" * string(i)
+    # output_filename = filehead * fileparam * "_iter$(iteration).jld2"
+    # snapshot = load_subdomain_snapshot(output_filename)
 
-filter_scale = 100                                      # meters, bound between submesoscale and BLT
+    fileparam = "region" * string(region)
 
-# # Cache of computed PV variables (x, y, horizontalq/verticalq/q, filtered & unfiltered)
-# pv_cache_file = filesave * fileparam * "_iter$(iteration)_pv.jld2"
-# # Load PV cache file if it exists, or compute PV
-# x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f = compute_load_pv(
-#             pv_cache_file, filehead, fileparam, iteration, dx, dy, dz, α, g, f, filter_scale)
+    # ---
 
-# # Plot field and spectra of region
-# plot_fieldspectra(x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f)
+    # # 2a. Compute filtered potential vorticity (for 10x10km tiles where snapshot contains [:T,:u,:v,:w])
+    # plot_filteredPV(snapshot, fileparam)
 
-# # Clear variables - TEMPORARY SINCE I KNOW PVSPECTRA CACHE EXISTS
-# horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f = ntuple(i -> nothing, 6)
-# GC.gc()                                                 # force the garbage collector to run immediately
+    # 2b. Load or compute PV variables
 
-# --- 
+    filter_scale = 100                                      # meters, bound between submesoscale and BLT
 
-# 3. Compute spectra for unfiltered and filtered q
+    # # Cache of computed PV variables (x, y, horizontalq/verticalq/q, filtered & unfiltered)
+    # pv_cache_file = filesave * fileparam * "_iter$(iteration)_pv.jld2"
+    # # Load PV cache file if it exists, or compute PV
+    # x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f = compute_load_pv(
+    #             pv_cache_file, filehead, fileparam, iteration, dx, dy, dz, α, g, f, filter_scale)
 
-# Define cutoffs
-cutoffs = 10 .^ range(4, 0, length=100)                 # 100 log-spaced values from 1e4 down to 1e0
-K = 2π ./ cutoffs                                       # band edge wavenumbers, increasing
-labels = ["κ ≤ 2π/$(cutoffs[1])",
-        ["2π/$(cutoffs[n]) < κ ≤ 2π/$(cutoffs[n+1])" for n in 1:length(cutoffs)-1]...,
-        "κ > 2π/$(cutoffs[end])"]
+    # # Plot field and spectra of region
+    # plot_fieldspectra(x, y, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f)
 
-# Cache of computed PV spectra/bands (filtered & unfiltered)
-pvspectra_cache_file = filesave * fileparam * "_iter$(iteration)_pvspectra.jld2"
-# # Load PV spectra cache file if it exists, or compute PV spectra
-# S_quf, bands_quf, S_qf, bands_qf, S_horquf, S_verquf, S_horqf, S_verqf = compute_load_pvspectra(
-#                     pvspectra_cache_file, labels, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f)
+    # # Clear variables - TEMPORARY SINCE I KNOW PVSPECTRA CACHE EXISTS
+    # horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f = ntuple(i -> nothing, 6)
+    # GC.gc()                                                 # force the garbage collector to run immediately
 
-# TEMPORARY SINCE I KNOW THE CACHE EXISTS
-println("Loading cached PV spectra variables from $pvspectra_cache_file...")
-S_quf, S_qf, S_horquf, S_verquf, S_horqf, S_verqf =
-    load(pvspectra_cache_file, "S_quf", "S_qf", "S_horquf", "S_verquf", "S_horqf", "S_verqf")
+    # ---
 
-# # --- 
+    # 3. Compute spectra for unfiltered and filtered q
 
-# # 4a. Color spectra plot according to max |q_uf| or max |q_f| by evaluating 100 band regimes
-# plot_spectra_colormag(filesave, fileparam, labels, K, S_quf, bands_quf, S_qf, bands_qf)
+    # Define cutoffs
+    cutoffs = 10 .^ range(4, 0, length=100)                 # 100 log-spaced values from 1e4 down to 1e0
+    K = 2π ./ cutoffs                                       # band edge wavenumbers, increasing
+    labels = ["κ ≤ 2π/$(cutoffs[1])",
+            ["2π/$(cutoffs[n]) < κ ≤ 2π/$(cutoffs[n+1])" for n in 1:length(cutoffs)-1]...,
+            "κ > 2π/$(cutoffs[end])"]
 
-# # ===== TEMPORARY: compute PV + spectra caches for regions A, B, C (delete after use) =====
-# for reg in ["A", "B", "C"]
-#     println("--- [temp] Region $(reg) ---")
-#     reg_param = "region" * reg
-#     reg_pv = compute_load_pv(filesave * reg_param * "_iter$(iteration)_pv.jld2",
-#                              filehead, reg_param, iteration, dx, dy, dz, α, g, f, filter_scale)
-#     _, _, hq_uf, vq_uf, tq_uf, hq_f, vq_f, tq_f = reg_pv
-#     compute_load_pvspectra(filesave * reg_param * "_iter$(iteration)_pvspectra.jld2",
-#                            labels, hq_uf, vq_uf, tq_uf, hq_f, vq_f, tq_f)
-#     reg_pv = hq_uf = vq_uf = tq_uf = hq_f = vq_f = tq_f = nothing   # free the 2048×2048 fields
-#     GC.gc()
-# end
-# # ===== END TEMPORARY =====
+    # Cache of computed PV spectra/bands (filtered & unfiltered)
+    pvspectra_cache_file = filesave * fileparam * "_iter$(iteration)_pvspectra.jld2"
+    # # Load PV spectra cache file if it exists, or compute PV spectra
+    # S_quf, S_qf, S_horquf, S_verquf, S_horqf, S_verqf = compute_load_pvspectra(
+    #                     pvspectra_cache_file, labels, horizontalq_uf, verticalq_uf, q_uf, horizontalq_f, verticalq_f, q_f)
 
-# 4b. Plot spectra of total, horizontal, and vertical PV components
-plot_spectra_components(filesave, fileparam, S_quf, S_horquf, S_verquf, S_qf, S_horqf, S_verqf)
+    # TEMPORARY SINCE I KNOW THE CACHE EXISTS
+    println("Loading cached PV spectra variables from $pvspectra_cache_file...")
+    S_quf, S_qf, S_horquf, S_verquf, S_horqf, S_verqf =
+        load(pvspectra_cache_file, "S_quf", "S_qf", "S_horquf", "S_verquf", "S_horqf", "S_verqf")
 
-# # 4c. Compare total/horizontal/vertical PV spectra across regions A, B, C
-# if all(region -> isfile(filesave * "region$(region)_iter$(iteration)_pvspectra.jld2"), ["A", "B", "C"])
-#     plot_spectra_regions(filesave, iteration)
-# else
-#     println("Skipping region comparison: not all region A/B/C spectra caches exist yet")
-# end
+    # # ---
+
+    # # 4a. Color spectra plot according to max |q_uf| or max |q_f| by evaluating 100 band regimes
+    # plot_spectra_colormag(filesave, fileparam, labels, K, S_quf, bands_quf, S_qf, bands_qf)
+
+    # # ===== TEMPORARY: compute PV + spectra caches for regions A, B, C (delete after use) =====
+    # for reg in ["A", "B", "C"]
+    #     println("--- [temp] Region $(reg) ---")
+    #     reg_param = "region" * reg
+    #     reg_pv = compute_load_pv(filesave * reg_param * "_iter$(iteration)_pv.jld2",
+    #                              filehead, reg_param, iteration, dx, dy, dz, α, g, f, filter_scale)
+    #     _, _, hq_uf, vq_uf, tq_uf, hq_f, vq_f, tq_f = reg_pv
+    #     compute_load_pvspectra(filesave * reg_param * "_iter$(iteration)_pvspectra.jld2",
+    #                            labels, hq_uf, vq_uf, tq_uf, hq_f, vq_f, tq_f)
+    #     reg_pv = hq_uf = vq_uf = tq_uf = hq_f = vq_f = tq_f = nothing   # free the 2048×2048 fields
+    #     GC.gc()
+    # end
+    # # ===== END TEMPORARY =====
+
+    # 4b. Plot spectra of total, horizontal, and vertical PV components
+    plot_spectra_components(filesave, fileparam, S_quf, S_horquf, S_verquf, S_qf, S_horqf, S_verqf)
+
+    # # 4c. Compare total/horizontal/vertical PV spectra across regions A, B, C
+    # if all(region -> isfile(filesave * "region$(region)_iter$(iteration)_pvspectra.jld2"), ["A", "B", "C"])
+    #     plot_spectra_regions(filesave, iteration)
+    # else
+    #     println("Skipping region comparison: not all region A/B/C spectra caches exist yet")
+    # end
+
+elseif sim == "hy"
+    hy_snapshot = 121       # day 7.5 (matches nhy iteration 164410)
+    hy_klev = 222           # z = -2.8125 m in the hy grid (cf. visualize_spectra_hybrid.jl)
+    pv_cache_file = filesave * "hy_region$(region)_snap$(hy_snapshot)_k$(hy_klev)_pv.jld2"
+    x, y, horizontalq_uf, verticalq_uf, q_uf = hy_compute_load_pv(
+        pv_cache_file, region, hy_snapshot, hy_klev, hy_dx, hy_dy, dz, α, g, f)
+    plot_fieldspectra_hy(x, y, horizontalq_uf, verticalq_uf, q_uf, region, hy_snapshot)
+    plot_spectra_components_hy(horizontalq_uf, verticalq_uf, q_uf, region, hy_snapshot, hy_dx, hy_dy)
+
+elseif sim == "both"
+    nhy_iteration = 164410  # nhy day 7.5 (not `iteration`, which is imported from LESStudySetup/Oceananigans)
+    hy_snapshot = 121       # hy day 7.5
+    hy_klev = 222           # z = -2.8125 m in the hy grid
+    plot_spectra_regions_hybrid(filesave, nhy_iteration, hy_snapshot, hy_klev)
+
+else
+    error("Unknown sim: $sim. Expected \"hy\", \"nhy\", or \"both\".")
+end
 
