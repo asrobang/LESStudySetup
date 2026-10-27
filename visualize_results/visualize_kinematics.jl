@@ -5,14 +5,14 @@ using LaTeXStrings
 using FFTW
 using Oceananigans.Grids: xnodes, ynodes, znodes, xspacings, yspacings
 using Oceananigans.Fields: interior
-using LESStudySetup.Diagnostics: load_subdomain_snapshot, isotropic_powerspectrum
+using LESStudySetup.Diagnostics: load_subdomain_snapshot, load_snapshots, isotropic_powerspectrum
 using MathTeXEngine
 using JLD2 #, CUDA
 set_theme!(theme_latexfonts(), fontsize=12, figure_padding = 10)
 
 # --- Set file directories ---
 filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/" 
-filesave = "/home/asrobang/orcd/scratch/figures/20261014_regionABC_kinematics/"
+filesave = "/home/asrobang/orcd/scratch/figures/20261022_nhy_fluxes/"
 
 # --- Set parameters ---
 set_value!(; Δh = 4.8828125)    # horizontal spacing
@@ -106,18 +106,31 @@ function gaussian_filter(field, k, smooth; periodic_x=true, periodic_y=true)
     """
         gaussian_filter(field, k, smooth; periodic_x=true, periodic_y=true)
 
-    Gaussian low-pass filter (width Δ = `smooth`, physical length) applied in the
-    horizontal to level `k` of `field`. Transfer function exp(-κ²Δ²/24).
-
-    Non-periodic directions are mirror-padded (half-sample symmetric reflection,
-    appropriate for cell-centered data) before the FFT. This is equivalent to a
-    zero-gradient condition at those edges and avoids wraparound contamination.
+    Gaussian low-pass filter applied in the horizontal to level `k` of an
+    Oceananigans `field`. Extracts the 2D slice and grid spacings, then calls
+    the matrix method below.
     """
     grid = field.grid
     Δx = minimum(xspacings(grid, Center()))
     Δy = minimum(yspacings(grid, Center()))
 
     data = Array(interior(field, :, :, k))
+
+    return gaussian_filter(data, Δx, Δy, smooth; periodic_x, periodic_y)
+end
+
+function gaussian_filter(data::AbstractMatrix, Δx, Δy, smooth; periodic_x=true, periodic_y=true)
+    """
+        gaussian_filter(data::AbstractMatrix, Δx, Δy, smooth; periodic_x=true, periodic_y=true)
+
+    Gaussian low-pass filter (width Δ = `smooth`, physical length) applied to a
+    2D horizontal array `data` with grid spacings `Δx`, `Δy`.
+    Transfer function exp(-κ²Δ²/24).
+
+    Non-periodic directions are mirror-padded (half-sample symmetric reflection,
+    appropriate for cell-centered data) before the FFT. This is equivalent to a
+    zero-gradient condition at those edges and avoids wraparound contamination.
+    """
     Nx, Ny = size(data)
 
     # Mirror-pad non-periodic directions
@@ -258,12 +271,12 @@ function compute_strain(dudx, dudx_f, dudy, dudy_f, dvdx, dvdx_f, dvdy, dvdy_f)
     return sig_n_uf, sig_s_uf, sig_uf, sig_n_f, sig_s_f, sig_f
 end
 
-function compute_fluxes()
+function compute_fluxes(flux_cache_file, filehead, fileparam, iteration, klev, filter_scale)
     if isfile(flux_cache_file)
         println("Loading cached flux variables from $flux_cache_file...")
-        # x, y, dTdx, dTdx_f, dTdy, dTdy_f, dudx, dudx_f, dudy, dudy_f, dvdx, dvdx_f, dvdy, dvdy_f =
-        #     load(grad_cache_file,   "x", "y", "dTdx", "dTdx_f", "dTdy", "dTdy_f", 
-        #                             "dudx", "dudx_f", "dudy", "dudy_f", "dvdx", "dvdx_f", "dvdy", "dvdy_f")
+        x, y, T_f, u_f, v_f, w_f, uT_flux, vT_flux, wT_flux, uu_flux, uv_flux, uw_flux, vv_flux, vw_flux, ww_flux, TKE =
+            load(flux_cache_file,   "x", "y", "T_f", "u_f", "v_f", "w_f", "uT_flux", "vT_flux", "wT_flux",
+                                    "uu_flux", "uv_flux", "uw_flux", "vv_flux", "vw_flux", "ww_flux", "TKE")
     else
         # --- Obtain unfiltered and filtered copies of T, u, v, w ---
 
@@ -271,6 +284,8 @@ function compute_fluxes()
         output_filename = filehead * "subdomain_T_" * fileparam * "_iter$(iteration).jld2"      # Load T field
         snapshot = load_subdomain_snapshot(output_filename)
         x, y, _ = nodes(snapshot[:T])                               # call this one time to get x and y coords
+        Δx = minimum(xspacings(snapshot[:T].grid, Center()))        # grid spacings, for filtering plain arrays below
+        Δy = minimum(yspacings(snapshot[:T].grid, Center()))
         T_uf = copy(interior(snapshot[:T],:,:,klev))                # 2048×2048 Matrix{Float32}
         T_f = gaussian_filter(snapshot[:T], klev, filter_scale)     # 2048×2048 Matrix{Float32}
         snapshot = nothing
@@ -300,15 +315,107 @@ function compute_fluxes()
         snapshot = nothing
         GC.gc()                                                     # force the garbage collector to run immediately
 
-        # --- Compute fluxes ---
+        # --- Compute u'T', v'T', w'T' fluxes ---
+
+        uT_flux = gaussian_filter(u_uf .* T_uf, Δx, Δy, filter_scale) .- (u_f .* T_f)
+        vT_flux = gaussian_filter(v_uf .* T_uf, Δx, Δy, filter_scale) .- (v_f .* T_f)
+        wT_flux = gaussian_filter(w_uf .* T_uf, Δx, Δy, filter_scale) .- (w_f .* T_f)
+        T_uf = nothing
+        GC.gc()                                                     # force the garbage collector to run immediately
+
+        # --- Compute u'u', u'v', u'w', v'v', v'w', w'w' fluxes ---
+
+        uu_flux = gaussian_filter(u_uf .* u_uf, Δx, Δy, filter_scale) .- (u_f .* u_f)
+        uv_flux = gaussian_filter(u_uf .* v_uf, Δx, Δy, filter_scale) .- (u_f .* v_f)
+        uw_flux = gaussian_filter(u_uf .* w_uf, Δx, Δy, filter_scale) .- (u_f .* w_f)
+        TKE = (gaussian_filter(u_uf.^2 + v_uf.^2 + w_uf.^2, Δx, Δy, filter_scale) .- (u_f.^2 + v_f.^2 + w_f.^2))./2
+        u_uf = nothing
+        GC.gc()                                                     # force the garbage collector to run immediately
+
+        vv_flux = gaussian_filter(v_uf .* v_uf, Δx, Δy, filter_scale) .- (v_f .* v_f)
+        vw_flux = gaussian_filter(v_uf .* w_uf, Δx, Δy, filter_scale) .- (v_f .* w_f)
+        v_uf = nothing
+        GC.gc()                                                     # force the garbage collector to run immediately
+
+        ww_flux = gaussian_filter(w_uf .* w_uf, Δx, Δy, filter_scale) .- (w_f .* w_f)
+        w_uf = nothing
+        GC.gc()                                                     # force the garbage collector to run immediately
 
         # --- Save computed gradient variables to cache so future runs can skip recomputation ---
         mkpath(filesave)
-        jldsave(grad_cache_file; x, y, dTdx, dTdx_f, dTdy, dTdy_f, dudx, dudx_f, dudy, dudy_f, dvdx, dvdx_f, dvdy, dvdy_f)
-        println("Saved cached gradient variables to $grad_cache_file")
+        jldsave(flux_cache_file; 
+                x, y, T_f, u_f, v_f, w_f, uT_flux, vT_flux, wT_flux, uu_flux, uv_flux, uw_flux, vv_flux, vw_flux, ww_flux, TKE)
+        println("Saved cached flux variables to $flux_cache_file")
     end # if isfile(flux_cache_file)
 
-    # return x, y, dTdx, dTdx_f, dTdy, dTdy_f, dudx, dudx_f, dudy, dudy_f, dvdx, dvdx_f, dvdy, dvdy_f
+    return x, y, T_f, u_f, v_f, w_f, uT_flux, vT_flux, wT_flux, uu_flux, uv_flux, uw_flux, vv_flux, vw_flux, ww_flux, TKE
+end
+
+### -------------------------------------------------------------------------
+### Hydrostatic (hy) simulation: full periodic domain, sliced to region A/B/C
+
+hy_filehead = "/orcd/data/abodner/002/shared_datasets/hyles_output/"
+hy_filename = hy_filehead * "hydrostatic_snapshots_hydrostatic_twin_simulation.jld2"
+hy_metadata = hy_filehead * "experiment_hydrostatic_twin_simulation_metadata.jld2"
+hy_dx, hy_dy = 156.25, 156.25     # [m] hy horizontal grid spacing
+hy_Nx, hy_Ny = 640, 640           # hy full-domain size (periodic)
+
+# Region index windows in the hy full domain (if left > right, the range wraps the periodic boundary)
+function hy_region_ranges(region)
+    if region == "A"
+        xL, xR = 352, 608
+        yB, yT = 192, 448
+    elseif region == "B"
+        xL, xR = 512, 128
+        yB, yT = 480, 96
+    elseif region == "C"
+        xL, xR = 64, 320
+        yB, yT = 192, 448
+    else
+        error("Subdomain not detected: region = \"$region\"; expected \"A\", \"B\", or \"C\".")
+    end
+    xrange = xL > xR ? vcat(xL:hy_Nx, 1:xR) : (xL:xR)
+    yrange = yB > yT ? vcat(yB:hy_Ny, 1:yT) : (yB:yT)
+    return xrange, yrange
+end
+
+# Forward differences along x (dim 1) and y (dim 2) of a periodic (Nx, Ny) array
+function compute_dAdx_dAdy_periodic(A, dx, dy)
+    dAdx = (circshift(A, (-1, 0)) .- A) ./ dx
+    dAdy = (circshift(A, (0, -1)) .- A) ./ dy
+    return dAdx, dAdy
+end
+
+function hy_compute_load_gradients(grad_cache_file, region, snapshot_number, klev, dx, dy)
+    if isfile(grad_cache_file)
+        println("Loading cached hy gradient variables from $grad_cache_file...")
+        x, y, dTdx, dTdy, dudx, dudy, dvdx, dvdy =
+            load(grad_cache_file, "x", "y", "dTdx", "dTdy", "dudx", "dudy", "dvdx", "dvdy")
+    else
+        xrange, yrange = hy_region_ranges(region)       # errors before loading data if region is invalid
+        set_value!(; Δh = hy_dx)
+        println("Loading hydrostatic data from $hy_filename...")
+        snapshots = load_snapshots(hy_filename; metadata = hy_metadata)
+
+        # Gradients on the full periodic domain, then sliced to the region
+        T = Array(interior(snapshots[:T][snapshot_number], :, :, klev))      # 640×640
+        dTdx, dTdy = compute_dAdx_dAdy_periodic(T, dx, dy)
+        u = Array(interior(snapshots[:u][snapshot_number], :, :, klev))
+        dudx, dudy = compute_dAdx_dAdy_periodic(u, dx, dy)
+        v = Array(interior(snapshots[:v][snapshot_number], :, :, klev))
+        dvdx, dvdy = compute_dAdx_dAdy_periodic(v, dx, dy)
+        dTdx, dTdy, dudx, dudy, dvdx, dvdy = (A[xrange, yrange] for A in (dTdx, dTdy, dudx, dudy, dvdx, dvdy))
+
+        # Monotonic region coordinates (unwrapped across the periodic boundary) for the heatmap
+        xT, yT, _ = nodes(snapshots[:T][snapshot_number])
+        x = xT[first(xrange)] .+ (0:length(xrange)-1) .* dx
+        y = yT[first(yrange)] .+ (0:length(yrange)-1) .* dy
+
+        mkpath(filesave)
+        jldsave(grad_cache_file; x, y, dTdx, dTdy, dudx, dudy, dvdx, dvdy)
+        println("Saved cached hy gradient variables to $grad_cache_file")
+    end
+    return x, y, dTdx, dTdy, dudx, dudy, dvdx, dvdy
 end
 
 ### -------------------------------------------------------------------------
@@ -388,6 +495,52 @@ function plot_image(grad_cache_file, filehead, fileparam, iteration, klev, α, g
     Colorbar(fig[1, 2], hm)
     save(filesave * var * "_f_" * fileparam * "_iter$(iteration).png", fig; px_per_unit = 4)
     println("Finished plotting filtered " * var * " heatmap")
+end
+
+## Plots the unfiltered hy heatmap for a region for a given indicated variable
+## available variables: front, vort, div, strain_n, strain_s, strain
+function plot_image_hy(region, snapshot_number, klev, α, g, dx, dy, var)
+    grad_cache_file = filesave * "hy_region$(region)_snap$(snapshot_number)_k$(klev)_grad.jld2"
+    x, y, dTdx, dTdy, dudx, dudy, dvdx, dvdy = hy_compute_load_gradients(
+        grad_cache_file, region, snapshot_number, klev, dx, dy)
+
+    # Unfiltered gradients passed in both slots; only the first (unfiltered) output is used
+    if (var == "front")
+        colormap = :balance
+        colorscale = Makie.Symlog10(-5e-16, 5e-16)
+        field, _ = compute_frontogenesis(α, g, dTdx, dTdx, dTdy, dTdy, dudx, dudx, dudy, dudy, dvdx, dvdx, dvdy, dvdy)
+        cmin, cmax = -5e-16, 5e-16
+    elseif (var == "vort")
+        colormap = :curl
+        colorscale = identity
+        field, _ = compute_vorticity(dudy, dudy, dvdx, dvdx)
+        cmin, cmax = -0.001, 0.001
+    elseif (var == "div")
+        colormap = :delta
+        colorscale = identity
+        field, _ = compute_divergence(dudx, dudx, dvdy, dvdy)
+        cmin, cmax = -0.001, 0.001
+    elseif var in ("strain_n", "strain_s", "strain")
+        # returns: sig_n_uf, sig_s_uf, sig_uf, sig_n_f, sig_s_f, sig_f
+        out = compute_strain(dudx, dudx, dudy, dudy, dvdx, dvdx, dvdy, dvdy)
+        k = var == "strain_n" ? 1 : var == "strain_s" ? 2 : 3
+        field = out[k]
+        colormap   = var == "strain" ? :amp : :balance
+        colorscale = var == "strain" ? log10 : identity
+        cmin, cmax = var == "strain" ? (1e-5, 1e-2) : (-0.001, 0.001)
+    else
+        error("Unknown var: $var")
+    end
+
+    fig = Figure(size = (700, 640))
+    ax = Axis(fig[1, 1]; aspect = DataAspect())
+    hm = heatmap!(ax, 1e-3x, 1e-3y, field;
+                rasterize = true, colormap = colormap,
+                colorscale = colorscale,
+                colorrange = (cmin, cmax))
+    Colorbar(fig[1, 2], hm)
+    save(filesave * "hy_" * var * "_region$(region)_snap$(snapshot_number).png", fig; px_per_unit = 4)
+    println("Finished plotting hy " * var * " heatmap")
 end
 
 function plot_spectra(iteration, klev, α, g, dx, dy, filter_scale, var; regions=["A", "B", "C"])
@@ -475,41 +628,130 @@ function plot_spectra(iteration, klev, α, g, dx, dy, filter_scale, var; regions
     println("Saved figure of $(var) spectra for regions $(join(regions, ", "))")
 end
 
+## Plots the fluxes
+function plot_fluxes(flux_cache_file, filehead, fileparam, iteration, klev, filter_scale, var)
+
+    # Load flux cache file if it exists, or compute fluxes
+    x, y, T_f, u_f, v_f, w_f, uT_flux, vT_flux, wT_flux, uu_flux, uv_flux, uw_flux, vv_flux, vw_flux, ww_flux, TKE =
+        compute_fluxes(flux_cache_file, filehead, fileparam, iteration, klev, filter_scale)
+
+    # Map the variable name to the actual array
+    fields = Dict(
+        "T_f" => T_f, "u_f" => u_f, "v_f" => v_f, "w_f" => w_f,
+        "uT_flux" => uT_flux, "vT_flux" => vT_flux, "wT_flux" => wT_flux,
+        "uu_flux" => uu_flux, "uv_flux" => uv_flux, "uw_flux" => uw_flux,
+        "vv_flux" => vv_flux, "vw_flux" => vw_flux, "ww_flux" => ww_flux,
+        "TKE" => TKE
+    )
+    haskey(fields, var) || error("Unknown flux variable: $var. Options: $(join(sort(collect(keys(fields))), ", "))")
+    field = fields[var]
+
+    # LaTeX symbols for the title
+    flux_syms = Dict(
+        "T_f" => "\\overline{T}", "u_f" => "\\overline{u}", "v_f" => "\\overline{v}", "w_f" => "\\overline{w}",
+        "uT_flux" => "u'T'", "vT_flux" => "v'T'", "wT_flux" => "w'T'",
+        "uu_flux" => "u'u'", "uv_flux" => "u'v'", "uw_flux" => "u'w'",
+        "vv_flux" => "v'v'", "vw_flux" => "v'w'", "ww_flux" => "w'w'",
+        "TKE" => "TKE"
+    )
+
+    fmin, fmax = extrema(field)
+    # Color range by variable type
+    if var == "TKE"
+        crange = (0, 1e-3)
+        cmap = :amp
+    elseif occursin("T", var)                       # uT_flux, vT_flux, wT_flux
+        crange = (-2e-4, 2e-4)
+        cmap = :balance
+    elseif var in ("uu_flux", "vv_flux", "ww_flux")      # uu, vv, ww variances (non-negative)
+        crange = (0, 2e-3)
+        cmap = :amp
+    else                                                  # uv, uw, vw
+        crange = (-1e-4, 1e-4)
+        cmap = :balance
+    end
+
+    ttl = latexstring(flux_syms[var] *
+          "\\quad [" * @sprintf("%.3e", fmin) * ",\\ " * @sprintf("%.3e", fmax) * "]")
+
+    fig = Figure(size = (700, 640))
+    ax = Axis(fig[1, 1]; aspect = DataAspect(), title = ttl,
+              xlabel = "x (km)", ylabel = "y (km)")
+    hm = heatmap!(ax, 1e-3x, 1e-3y, field;
+                rasterize = true, colormap = cmap,
+                colorrange = crange)
+    Colorbar(fig[1, 2], hm)
+    save(filesave * var * "_" * fileparam * "_iter$(iteration).png", fig; px_per_unit = 4)
+    println("Finished plotting " * var * " heatmap")
+end
+
 ### -------------------------------------------------------------------------
 ## Main
 
-# 1. Define subdomain
-
-# Identify iteration (which denotes timestep)
-iteration = 164410
-println("Iteration: $(iteration)")
-klev = 70
+# ! ! ! ! ! EDIT THIS ONE TO SWITCH SIMULATION ! ! ! ! !
+sim = "nhy"     # "hy" or "nhy"
+println("Simulation: $(sim)")
 
 # Region A/B/C
 region = "A"
 println("--- Region $(region) ---")
-fileparam = "region" * string(region)
 
-# filter_scale = 300                                      # meters, bound between submesoscale and BLT
-filter_scale = 100                                      # meters, for Gaussian filter to match spectra of 300m sharp spectral cutoff
+if sim == "nhy"
+    # 1. Define subdomain
 
-# Cache of computed gradient variables (dTdx, dTdy, dudx, dudy, dvdx, dvdy, filtered & unfiltered)
-grad_cache_file = filesave * fileparam * "_iter$(iteration)_grad.jld2"
+    # Identify iteration (which denotes timestep)
+    nhy_iteration = 164410
+    println("Iteration: $(nhy_iteration)")
+    klev = 70
 
-# # 2. Load/compute variables and plot
-# plot_image(grad_cache_file, filehead, fileparam, iteration, klev, α, g, dx, dy, filter_scale, "front")
-# plot_image(grad_cache_file, filehead, fileparam, iteration, klev, α, g, dx, dy, filter_scale, "vort")
-# plot_image(grad_cache_file, filehead, fileparam, iteration, klev, α, g, dx, dy, filter_scale, "div")
-# plot_image(grad_cache_file, filehead, fileparam, iteration, klev, α, g, dx, dy, filter_scale, "strain_n")
-# plot_image(grad_cache_file, filehead, fileparam, iteration, klev, α, g, dx, dy, filter_scale, "strain_s")
-# plot_image(grad_cache_file, filehead, fileparam, iteration, klev, α, g, dx, dy, filter_scale, "strain")
+    fileparam = "region" * string(region)
 
-# 2. Load/compute variables' spectra and plot spectra
-plot_spectra(iteration, klev, α, g, dx, dy, filter_scale, "front")
-# plot_spectra(iteration, klev, α, g, dx, dy, filter_scale, "vort")
-# plot_spectra(iteration, klev, α, g, dx, dy, filter_scale, "div")
-# plot_spectra(iteration, klev, α, g, dx, dy, filter_scale, "strain_n")
-# plot_spectra(iteration, klev, α, g, dx, dy, filter_scale, "strain_s")
-# plot_spectra(iteration, klev, α, g, dx, dy, filter_scale, "strain")
+    # filter_scale = 300                                      # meters, bound between submesoscale and BLT
+    filter_scale = 100                                      # meters, for Gaussian filter to match spectra of 300m sharp spectral cutoff
+
+    # Cache of computed gradient variables (dTdx, dTdy, dudx, dudy, dvdx, dvdy, filtered & unfiltered)
+    grad_cache_file = filesave * fileparam * "_iter$(nhy_iteration)_grad.jld2"
+
+    # # 2. Load/compute variables and plot
+    # plot_image(grad_cache_file, filehead, fileparam, nhy_iteration, klev, α, g, dx, dy, filter_scale, "front")
+    # plot_image(grad_cache_file, filehead, fileparam, nhy_iteration, klev, α, g, dx, dy, filter_scale, "vort")
+    # plot_image(grad_cache_file, filehead, fileparam, nhy_iteration, klev, α, g, dx, dy, filter_scale, "div")
+    # plot_image(grad_cache_file, filehead, fileparam, nhy_iteration, klev, α, g, dx, dy, filter_scale, "strain_n")
+    # plot_image(grad_cache_file, filehead, fileparam, nhy_iteration, klev, α, g, dx, dy, filter_scale, "strain_s")
+    # plot_image(grad_cache_file, filehead, fileparam, nhy_iteration, klev, α, g, dx, dy, filter_scale, "strain")
+
+    # 2. Load/compute variables' spectra and plot spectra
+    # plot_spectra(nhy_iteration, klev, α, g, dx, dy, filter_scale, "front")
+    # plot_spectra(nhy_iteration, klev, α, g, dx, dy, filter_scale, "vort")
+    # plot_spectra(nhy_iteration, klev, α, g, dx, dy, filter_scale, "div")
+    # plot_spectra(nhy_iteration, klev, α, g, dx, dy, filter_scale, "strain_n")
+    # plot_spectra(nhy_iteration, klev, α, g, dx, dy, filter_scale, "strain_s")
+    # plot_spectra(nhy_iteration, klev, α, g, dx, dy, filter_scale, "strain")
+
+    # Cache of computed flux variables
+    flux_cache_file = filesave * fileparam * "_iter$(nhy_iteration)_flux.jld2"
+
+    # 3. Load/compute turbulent fluxes and turbulent kinetic energy 
+    plot_fluxes(flux_cache_file, filehead, fileparam, nhy_iteration, klev, filter_scale, "uT_flux")
+    plot_fluxes(flux_cache_file, filehead, fileparam, nhy_iteration, klev, filter_scale, "vT_flux")
+    plot_fluxes(flux_cache_file, filehead, fileparam, nhy_iteration, klev, filter_scale, "wT_flux")
+    plot_fluxes(flux_cache_file, filehead, fileparam, nhy_iteration, klev, filter_scale, "uu_flux")
+    plot_fluxes(flux_cache_file, filehead, fileparam, nhy_iteration, klev, filter_scale, "uv_flux")
+    plot_fluxes(flux_cache_file, filehead, fileparam, nhy_iteration, klev, filter_scale, "uw_flux")
+    plot_fluxes(flux_cache_file, filehead, fileparam, nhy_iteration, klev, filter_scale, "vv_flux")
+    plot_fluxes(flux_cache_file, filehead, fileparam, nhy_iteration, klev, filter_scale, "vw_flux")
+    plot_fluxes(flux_cache_file, filehead, fileparam, nhy_iteration, klev, filter_scale, "ww_flux")
+    plot_fluxes(flux_cache_file, filehead, fileparam, nhy_iteration, klev, filter_scale, "TKE")
+
+elseif sim == "hy"
+    hy_snapshot = 121       # day 7.5 (matches nhy iteration 164410)
+    hy_klev = 222           # z = -2.8125 m in the hy grid (cf. visualize_spectra_hybrid.jl)
+    for var in ("front", "vort", "div", "strain_n", "strain_s", "strain")
+        plot_image_hy(region, hy_snapshot, hy_klev, α, g, hy_dx, hy_dy, var)
+    end
+
+else
+    error("Unknown sim: $sim. Expected \"hy\" or \"nhy\".")
+end
 
 # --- 
