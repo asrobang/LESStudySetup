@@ -18,7 +18,7 @@ hy_metadata  = hy_filehead * "experiment_hydrostatic_twin_simulation_metadata.jl
 
 nhy_filehead = "/orcd/data/abodner/002/shared_datasets/nhyles_output/subdomains_ASR/"
 
-filesave = "/home/asrobang/orcd/scratch/figures/20260927_regionABC_redo/"
+filesave = "/home/asrobang/orcd/scratch/figures/20261019_hy/"
 
 # =============================================================================
 # --- Shared physical parameters ---
@@ -38,18 +38,29 @@ nhy_dx, nhy_dy = 4.88281, 4.88281     # [m] nonhydrostatic horizontal grid spaci
 dz = 1.125                             # [m] vertical grid size (both sims)
 
 # --- klev matched so both sims are compared at the same z ---
-hy_klev  = 223       # z = -8.4375 m in the hydrostatic full-domain grid
-nhy_klev = 65        # z = -8.4375 m in the nonhydrostatic subdomain grid
-
-# We want close to the surface, so z ~ -2m
+hy_klev  = 222       # z = -2.8125 m in the hydrostatic full-domain grid
 nhy_klev = 70        # z = -2.8125 m in the nonhydrostatic subdomain grid
 
-# --- Slice of the hydrostatic full domain matching nhy subdomain 97 ---
-# (nhy subdomain 97 is a 10km x 10km tile; this xrange wraps the periodic x-boundary)
-# subdomain = 97
-# fileparam = "subdomain" * string(subdomain)
-hy_xrange = vcat(583:640, 1:7)
-hy_yrange = 391:455
+# --- Slice of the hydrostatic full domain matching region A, B, or C ---
+# (if left index > right index, the range wraps the periodic boundary)
+function hy_region_ranges(fileparam)
+    if fileparam == "regionA"
+        xL, xR = 352, 608
+        yB, yT = 192, 448
+    elseif fileparam == "regionB"
+        xL, xR = 512, 128
+        yB, yT = 480, 96
+    elseif fileparam == "regionC"
+        xL, xR = 64, 320
+        yB, yT = 192, 448
+    else
+        error("Subdomain not detected: fileparam = \"$fileparam\"; expected \"regionA\", \"regionB\", or \"regionC\".")
+    end
+
+    xrange = xL > xR ? vcat(xL:640, 1:xR) : (xL:xR)
+    yrange = yB > yT ? vcat(yB:640, 1:yT) : (yB:yT)
+    return xrange, yrange
+end
 
 # ! ! ! ! ! EDIT THIS ONE TO SWITCH REGION ! ! ! ! !
 fileparam = "regionB"
@@ -57,7 +68,8 @@ fileparam = "regionB"
 # --- Day <-> snapshot_number (hy) / iteration (nhy) correspondence ---
 # days              = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5]
 days              = [5.5, 6.5, 7.5]
-hy_snapshot_nums  = [9, 25, 41, 57, 73, 89, 105, 121]
+# hy_snapshot_nums  = [9, 25, 41, 57, 73, 89, 105, 121]
+hy_snapshot_nums  = [89, 105, 121]
 # nhy_iterations    = [22865, 42238, 62484, 82586, 103348, 123463, 143293, 164410]
 nhy_iterations    = [123463, 143293, 164410]
 
@@ -166,35 +178,6 @@ function nhyspectrum_uvwT(iteration, nday, fileparam, klev, dx, dy)
     return St, Su, Sv, Sw
 end
 
-# # =============================================================================
-# # --- Compute spectra across all days for a chosen sim: "hy", "nhy", or "both" ---
-# # Returns a NamedTuple of Vectors, one entry per day, for T, u, v, w spectra.
-# # =============================================================================
-# function compute_spectra_evol(sim::String)
-#     if sim == "hy"
-#         set_value!(; Δh = hy_dx)
-#         println("Loading hydrostatic data from $hy_filename...")
-#         snapshots = load_snapshots(hy_filename; metadata=hy_metadata)
-
-#         St, Su, Sv, Sw = ntuple(_ -> Vector{Any}(undef, length(days)), 4)
-#         for (i, snum) in enumerate(hy_snapshot_nums)
-#             St[i], Su[i], Sv[i], Sw[i] = hyspectrum_uvwT(snapshots, snum, hy_klev, hy_xrange, hy_yrange, hy_dx, hy_dy)
-#         end
-#         return (; St, Su, Sv, Sw)
-
-#     elseif sim == "nhy"
-#         set_value!(; Δh = nhy_dx)
-#         St, Su, Sv, Sw = ntuple(_ -> Vector{Any}(undef, length(days)), 4)
-#         for (i, iter) in enumerate(nhy_iterations)
-#             St[i], Su[i], Sv[i], Sw[i] = nhyspectrum_uvwT(iter, days[i], fileparam, nhy_klev, nhy_dx, nhy_dy)
-#         end
-#         return (; St, Su, Sv, Sw)
-
-#     else
-#         error("compute_spectra_evol expects \"hy\" or \"nhy\" (call both separately for overlay plots).")
-#     end
-# end
-
 # =============================================================================
 # --- On-disk cache of the full St/Su/Sv/Sw spectra vectors (all days), so a
 #     fresh Julia session can reload previously-computed spectra evolution
@@ -233,6 +216,8 @@ function load_spectra_cache(sim::String)
 end
 
 function compute_spectra_evol(sim::String; force_recompute=false)
+    sim == "hy" && return _compute_spectra_evol_uncached("hy")     # hy spectra are never cached
+
     if !force_recompute && isfile(spectra_cache_file(sim)) && spectra_cache_is_current(sim)
         return load_spectra_cache(sim)
     end
@@ -244,6 +229,7 @@ end
  
 function _compute_spectra_evol_uncached(sim::String)
     if sim == "hy"
+        hy_xrange, hy_yrange = hy_region_ranges(fileparam)    # errors before loading data if no region is selected
         set_value!(; Δh = hy_dx)
         println("Loading hydrostatic data from $hy_filename...")
         snapshots = load_snapshots(hy_filename; metadata=hy_metadata)
@@ -309,19 +295,26 @@ function plot_spectra_evol(sim::String, field::Symbol, varname::String;
     axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",
                     ylabel = L"E_{%$varname}(k)/E_{u} (k_{min},\text{day}=%$(norm_day),\text{%$(norm_region)})",
                     xscale = log10, yscale = log10,
-                    limits = ((10^-4.5, 10^0.5), (1e-12, 1e6)))
+                    limits = ((10^-4, 10^0), (1e-8, 1e2)))
 
     fig = Figure(size = (600, 500))
     ax = Axis(fig[1, 1]; title = zlabel, axis_kwargs1...)
+
+    # Shaded wavenumber bands (drawn first so they sit behind the lines)
+    k_10km  = 2π / 10000     # λ = 10 km
+    k_300m  = 2π / 300       # λ = 300 m
+    k_right = 10^0.5         # right edge of the x-limits
+    vspan!(ax, k_10km, k_right, color = (:lightblue, 0.15))   # light blue: k > 2π/10000
+    vspan!(ax, k_300m, k_right, color = (:steelblue, 0.15))  # darker: k > 2π/300 (layers on top of the light band)
 
     # Same reference for every field, sim, and region (see get_norm_factor)
     norm_spec1 = get_norm_factor()
 
     # k^(-2) and k^(-5/3) reference slopes (tune amplitudes A23, A13 by hand)
-    kref = 10 .^ range(-4.5, 0.5, length = 100)
-    A23, A53 = 1e-9, 1e0
-    lines!(ax, kref, A23 .* kref .^ (-2); linestyle = :dash, color = :grey, label = L"k^{-2}")
-    lines!(ax, kref, A53 .* kref .^ (-5/3); linestyle = :dash, color = :black, label = L"k^{-5/3}")
+    kref = 10 .^ range(-4, 0, length = 100)
+    A23, A53 = 1e-9, 1e-4
+    lines!(ax, kref, A23 .* kref .^ (-2); linestyle = :dot, color = :grey, label = L"k^{-2}")
+    lines!(ax, kref, A53 .* kref .^ (-5/3); linestyle = :dot, color = :black, label = L"k^{-5/3}")
     
     if sim in ("hy", "both") && hy_data !== nothing
         S = getfield(hy_data, field)
@@ -341,10 +334,10 @@ function plot_spectra_evol(sim::String, field::Symbol, varname::String;
         end
     end
 
-    xlims!(ax, (10^-4.5, 10^0.5))
-    # 10 km scale boundary (submesoscale / mesoscale)
-    vlines!(ax, [2π/10^4]; color = :red, linewidth = 0.5)
-    axislegend(ax, labelsize = 10, patchsize = (20, 5), position = (:left, :bottom))
+    xlims!(ax, (10^-4, 10^0))
+    # # 10 km scale boundary (submesoscale / mesoscale)
+    # vlines!(ax, [2π/10^4]; color = :red, linewidth = 0.5)
+    axislegend(ax, labelsize = 10, patchsize = (20, 5), position = (:right, :top))
 
     fname = filesave * "spectra$(varname)_" * "$(fileparam)_" * sim * "_evol.png"
     save(fname, fig)
@@ -380,8 +373,102 @@ function spectra_uvwT(sim::String)
 end
 
 # =============================================================================
+# --- Last-snapshot comparison across regions: hy (dashed) vs nhy (solid) ---
+# =============================================================================
+regions = ["regionA", "regionB", "regionC"]
+
+# Reuse a region's cached nhy spectra (written by spectra_uvwT for that region) if they
+# contain nhy_iter; otherwise compute them from the raw subdomain files
+function nhy_region_spectra_lastday(region, nhy_iter, nday)
+    cache_file = filesave * "nhy_spectra_evol_$(region)_k$(nhy_klev).jld2"
+    if isfile(cache_file)
+        stored = jldopen(jld -> haskey(jld, "iterations") ? jld["iterations"] : nothing, cache_file, "r")
+        idx = stored === nothing ? nothing : findfirst(==(nhy_iter), stored)
+        if idx !== nothing
+            println("Loading cached nhy $region spectra (iteration $nhy_iter) from $cache_file...")
+            St, Su, Sv, Sw = load(cache_file, "St", "Su", "Sv", "Sw")
+            return (; St = St[idx], Su = Su[idx], Sv = Sv[idx], Sw = Sw[idx])
+        end
+        println("Cached nhy $region spectra don't include iteration $nhy_iter, recomputing...")
+    end
+    St, Su, Sv, Sw = nhyspectrum_uvwT(nhy_iter, nday, region, nhy_klev, nhy_dx, nhy_dy)
+    return (; St, Su, Sv, Sw)
+end
+
+function compute_region_spectra_lastday()
+    hy_snum, nhy_iter, nday = hy_snapshot_nums[end], nhy_iterations[end], days[end]
+
+    set_value!(; Δh = hy_dx)
+    println("Loading hydrostatic data from $hy_filename...")
+    snapshots = load_snapshots(hy_filename; metadata=hy_metadata)
+    hy_region_data = map(regions) do region
+        xrange, yrange = hy_region_ranges(region)
+        St, Su, Sv, Sw = hyspectrum_uvwT(snapshots, hy_snum, hy_klev, xrange, yrange, hy_dx, hy_dy)
+        (; St, Su, Sv, Sw)
+    end
+
+    set_value!(; Δh = nhy_dx)
+    nhy_region_data = map(region -> nhy_region_spectra_lastday(region, nhy_iter, nday), regions)
+    return hy_region_data, nhy_region_data
+end
+
+function plot_spectra_regions(field::Symbol, varname::String, hy_region_data, nhy_region_data;
+                              zlabel="z=$(depth) m, Day $(days[end])")
+
+    axis_kwargs1 = (xlabel = "Wavenumber (rad⋅m⁻¹)",
+                    ylabel = L"E_{%$varname}(k)/E_{u} (k_{min},\text{day}=%$(norm_day),\text{%$(norm_region)})",
+                    xscale = log10, yscale = log10,
+                    limits = ((10^-4, 10^0), (1e-8, 1e2)))
+
+    fig = Figure(size = (600, 500))
+    ax = Axis(fig[1, 1]; title = zlabel, axis_kwargs1...)
+
+    # Shaded wavenumber bands (drawn first so they sit behind the lines)
+    k_10km  = 2π / 10000     # λ = 10 km
+    k_300m  = 2π / 300       # λ = 300 m
+    k_right = 10^0.5         # right edge of the x-limits
+    vspan!(ax, k_10km, k_right, color = (:lightblue, 0.15))
+    vspan!(ax, k_300m, k_right, color = (:steelblue, 0.15))
+
+    # Same reference for every field, sim, and region (see get_norm_factor)
+    norm_spec1 = get_norm_factor()
+
+    # k^(-2) and k^(-5/3) reference slopes
+    kref = 10 .^ range(-4, 0, length = 100)
+    A23, A53 = 1e-9, 1e-4
+    lines!(ax, kref, A23 .* kref .^ (-2); linestyle = :dot, color = :grey, label = L"k^{-2}")
+    lines!(ax, kref, A53 .* kref .^ (-5/3); linestyle = :dot, color = :black, label = L"k^{-5/3}")
+
+    colors = Makie.wong_colors()[1:length(regions)]
+    for (i, region) in enumerate(regions)
+        S_hy  = getfield(hy_region_data[i], field)
+        S_nhy = getfield(nhy_region_data[i], field)
+        lines!(ax, S_hy.freq, Real.(S_hy.spec ./ norm_spec1),
+            color = colors[i], linestyle = :dash, label = "hy " * region)
+        lines!(ax, S_nhy.freq, Real.(S_nhy.spec ./ norm_spec1),
+            color = colors[i], linestyle = :solid, label = "nhy " * region)
+    end
+
+    xlims!(ax, (10^-4, 10^0))
+    axislegend(ax, labelsize = 10, patchsize = (20, 5), position = (:right, :top))
+
+    fname = filesave * "spectra$(varname)_regionsABC_both_day$(replace(string(days[end]), "." => "-")).png"
+    save(fname, fig)
+    println("Saved $fname")
+end
+
+function spectra_regions_lastday()
+    println("------ Computing day $(days[end]) spectra for $(join(regions, ", ")) ------")
+    hy_region_data, nhy_region_data = compute_region_spectra_lastday()
+    for (field, varname) in [(:St, "T"), (:Su, "u"), (:Sv, "v"), (:Sw, "w")]
+        plot_spectra_regions(field, varname, hy_region_data, nhy_region_data)
+    end
+end
+
+# =============================================================================
 # --- Run ---
 # =============================================================================
 # spectra_uvwT("both")   # or "hy" / "nhy" individually
-spectra_uvwT("nhy")
+spectra_regions_lastday()   # day 7.5, hy vs nhy for regions A, B, C
+# spectra_uvwT("nhy")
 # spectra_uvwT("hy")
