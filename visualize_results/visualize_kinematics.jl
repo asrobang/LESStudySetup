@@ -30,12 +30,23 @@ dz = 1.125                      # [m] vertical grid size
 
 # --- Helper Functions ---
 
-function compute_dAdx_dAdy(A,dx,dy) 
-    A_hpad = hcat(A, A[:, 1:1])      # pad the first column at the rightmost (Ny,Nx+1)
-    A_vpad = vcat(A, A[1:1, :])      # pad the first row at the bottom (Ny+1,Nx)
-    dAdx = (A_hpad[:, 2:end] .- A_hpad[:, 1:end-1]) ./ dx
-    dAdy = (A_vpad[2:end, :] .- A_vpad[1:end-1, :]) ./ dy
+# INCORRECT
+# function compute_dAdx_dAdy(A,dx,dy) 
+#     A_hpad = hcat(A, A[:, 1:1])      # pad the first column at the rightmost (Ny,Nx+1)
+#     A_vpad = vcat(A, A[1:1, :])      # pad the first row at the bottom (Ny+1,Nx)
+#     dAdx = (A_hpad[:, 2:end] .- A_hpad[:, 1:end-1]) ./ dx
+#     dAdy = (A_vpad[2:end, :] .- A_vpad[1:end-1, :]) ./ dy
     
+#     return dAdx, dAdy
+# end
+function compute_dAdx_dAdy(A,dx,dy)
+    # A is indexed (Nx,Ny): dims=1 is x, dims=2 is y
+    # Subdomain is Bounded (not periodic), so repeat the last difference at the far edge instead of wrapping
+    dAdx = diff(A, dims=1) ./ dx                # (Nx-1,Ny)
+    dAdy = diff(A, dims=2) ./ dy                # (Nx,Ny-1)
+    dAdx = vcat(dAdx, dAdx[end:end, :])         # (Nx,Ny)
+    dAdy = hcat(dAdy, dAdy[:, end:end])         # (Nx,Ny)
+
     return dAdx, dAdy
 end
 
